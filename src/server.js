@@ -17,14 +17,32 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple CORS setup - allow all origins
+// CORS configuration
+const allowedOrigins = [
+  'https://efreightpro.in',
+  'https://www.efreightpro.in',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
 app.use(
   cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, curl, etc.)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Allow all origins in case of new domains
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    credentials: true,
   })
 );
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
