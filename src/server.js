@@ -29,6 +29,7 @@ app.use(
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/quotations', require('./routes/quotationRoutes'));
+app.use('/api/custom-suggestions', require('./routes/customSuggestionRoutes'));
 
 // Health check route
 app.get('/api/health', (req, res) => {
