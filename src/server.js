@@ -7,18 +7,25 @@ const errorHandler = require('./middleware/errorHandler');
 // Load env vars
 dotenv.config();
 
-// Connect to database
-connectDB();
-
-// Initialize express app
+// Initialize express app FIRST
 const app = express();
 
-// CORS - Allow all origins
-app.use(cors());
+// CORS - Must be first middleware
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+}));
+
+// Handle OPTIONS preflight for all routes
+app.options('*', cors());
 
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Connect to database (after middleware setup)
+connectDB();
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
