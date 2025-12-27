@@ -1,5 +1,6 @@
 const express = require('express');
 const dotenv = require('dotenv');
+const cors = require('cors');
 const connectDB = require('./config/database');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -11,6 +12,9 @@ connectDB();
 
 // Initialize express app
 const app = express();
+
+// CORS - Allow all origins
+app.use(cors());
 
 // Body parser middleware
 app.use(express.json());
