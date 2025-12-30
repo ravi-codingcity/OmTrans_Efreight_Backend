@@ -191,6 +191,12 @@ const quotationSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+
+    // Terms & Conditions (array of selected terms)
+    termsAndConditions: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
