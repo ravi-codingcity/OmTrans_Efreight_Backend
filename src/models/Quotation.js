@@ -159,6 +159,10 @@ const quotationSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+     eta: {
+      type: String,
+      default: '',
+    },
     transitTime: {
       type: String,
       default: '',
