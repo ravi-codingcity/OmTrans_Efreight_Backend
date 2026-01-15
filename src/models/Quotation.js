@@ -201,6 +201,12 @@ const quotationSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+
+      // Rail ramps
+    railRamps: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
