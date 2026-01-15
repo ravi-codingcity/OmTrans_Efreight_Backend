@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 // Sub-schema for charges (origin, freight, destination)
 const chargeSchema = new mongoose.Schema(
@@ -9,19 +9,19 @@ const chargeSchema = new mongoose.Schema(
     },
     charges: {
       type: String,
-      default: '',
+      default: "",
     },
     currency: {
       type: String,
-      default: 'USD',
+      default: "USD",
     },
     amount: {
       type: String,
-      default: '',
+      default: "",
     },
     unit: {
       type: String,
-      default: '',
+      default: "",
     },
   },
   { _id: false }
@@ -32,7 +32,7 @@ const quotationSchema = new mongoose.Schema(
     // Quotation ID (e.g., "SELCL-091225-925")
     id: {
       type: String,
-      required: [true, 'Quotation ID is required'],
+      required: [true, "Quotation ID is required"],
       unique: true,
       trim: true,
     },
@@ -40,26 +40,26 @@ const quotationSchema = new mongoose.Schema(
     // Quotation Segment Info
     quotationSegment: {
       type: String,
-      required: [true, 'Quotation segment is required'],
+      required: [true, "Quotation segment is required"],
       trim: true,
     },
     quotationSegmentPrefix: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // User/Creator Info
     createdBy: {
       type: String,
-      default: '',
+      default: "",
     },
     createdByLocation: {
       type: String,
-      default: '',
+      default: "",
     },
     createdByRole: {
       type: String,
-      default: '',
+      default: "",
     },
     createdDate: {
       type: Date,
@@ -69,107 +69,107 @@ const quotationSchema = new mongoose.Schema(
     // Customer & Consignee
     customerName: {
       type: String,
-      default: '',
+      default: "",
     },
     consigneeName: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Sea Freight Fields
     pol: {
       type: String,
-      default: '',
+      default: "",
     },
     pod: {
       type: String,
-      default: '',
+      default: "",
     },
     por: {
       type: String,
-      default: '',
+      default: "",
     },
     finalDestination: {
       type: String,
-      default: '',
+      default: "",
     },
     shippingLine: {
       type: String,
-      default: '',
+      default: "",
     },
     equipment: {
       type: String,
-      default: '',
+      default: "",
     },
     size: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Air Freight Fields
     airLines: {
       type: String,
-      default: '',
+      default: "",
     },
     airPortOfDeparture: {
       type: String,
-      default: '',
+      default: "",
     },
     airPortOfDestination: {
       type: String,
-      default: '',
+      default: "",
     },
     chargeableWeight: {
       type: String,
-      default: '',
+      default: "",
     },
     volumeWeight: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Cargo Details
     commodity: {
       type: String,
-      default: '',
+      default: "",
     },
     cargoSize: {
       type: String,
-      default: '',
+      default: "",
     },
     cbm: {
       type: String,
-      default: '',
+      default: "",
     },
     weight: {
       type: String,
-      default: '',
+      default: "",
     },
     numberOfPackets: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Shipment Details
     terms: {
       type: String,
-      default: '',
+      default: "",
     },
     etd: {
       type: String,
-      default: '',
+      default: "",
     },
-     eta: {
+    eta: {
       type: String,
-      default: '',
+      default: "",
     },
     transitTime: {
       type: String,
-      default: '',
+      default: "",
     },
     serviceJobType: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Charges Arrays
@@ -189,11 +189,11 @@ const quotationSchema = new mongoose.Schema(
     // Additional Fields
     remarks: {
       type: String,
-      default: '',
+      default: "",
     },
     pdfFileName: {
       type: String,
-      default: '',
+      default: "",
     },
 
     // Terms & Conditions (array of selected terms)
@@ -202,10 +202,10 @@ const quotationSchema = new mongoose.Schema(
       default: [],
     },
 
-      // Rail ramps
+    // Rail ramps
     railRamps: {
-      type: [String],
-      default: [],
+      type: String,
+      default: "",
     },
   },
   {
@@ -213,4 +213,4 @@ const quotationSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model('Quotation', quotationSchema);
+module.exports = mongoose.model("Quotation", quotationSchema);
