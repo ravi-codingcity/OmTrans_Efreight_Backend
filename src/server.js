@@ -10,7 +10,7 @@ const app = express();
 
 // CORS - Allow specific origin
 app.use((req, res, next) => {
-  const allowedOrigins = ['https://efreightpro.in', 'http://localhost:3000', 'http://localhost:5173'];
+  const allowedOrigins = ['https://efreightpro.in', 'http://localhost:3000', 'http://localhost:5173', 'https://om-trans-efreight.vercel.app'];
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
