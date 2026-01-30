@@ -27,20 +27,30 @@ app.use((req, res, next) => {
 // Body parser
 app.use(express.json());
 
-// Connect to database
-connectDB();
+// Start server after DB connection
+const startServer = async () => {
+  try {
+    // Connect to database first
+    await connectDB();
 
-// Routes
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/quotations', require('./routes/quotationRoutes'));
+    // Routes - only register after DB is connected
+    app.use('/api/auth', require('./routes/authRoutes'));
+    app.use('/api/quotations', require('./routes/quotationRoutes'));
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Server running' });
-});
+    // Health check
+    app.get('/api/health', (req, res) => {
+      res.json({ success: true, message: 'Server running' });
+    });
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+    // Start server
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app;
