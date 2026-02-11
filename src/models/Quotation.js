@@ -213,6 +213,16 @@ const quotationSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    // Draft and Status
+    isDraft: {
+      type: Boolean,
+      default: false,
+    },
+    status: {
+      type: String,
+      default: "submitted",
+    },
   },
   {
     timestamps: true,
