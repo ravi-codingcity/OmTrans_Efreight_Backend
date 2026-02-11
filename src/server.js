@@ -8,16 +8,11 @@ dotenv.config();
 // Initialize express app
 const app = express();
 
-// CORS - Allow specific origin
+// CORS - Allow all origins
 app.use((req, res, next) => {
-  const allowedOrigins = ['https://efreightpro.in', 'http://localhost:3000', 'http://localhost:5173', 'https://om-trans-efreight.vercel.app'];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
