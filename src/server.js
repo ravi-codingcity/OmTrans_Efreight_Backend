@@ -31,6 +31,7 @@ const startServer = async () => {
     // Routes - only register after DB is connected
     app.use('/api/auth', require('./routes/authRoutes'));
     app.use('/api/quotations', require('./routes/quotationRoutes'));
+    app.use('/api/rate-filings', require('./routes/rateFilingRoutes'));
 
     // Health check
     app.get('/api/health', (req, res) => {
