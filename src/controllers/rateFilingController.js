@@ -14,10 +14,22 @@ const createRateFiling = async (req, res) => {
         message: 'Name is required',
       });
     }
-    if (!data.pol || !data.pod) {
+    if (!data.por || !data.pol || !data.pod) {
       return res.status(400).json({
         success: false,
-        message: 'Port of Loading (POL) and Port of Discharge (POD) are required',
+        message: 'POR, POL, and POD are required',
+      });
+    }
+    if (!data.shipping_lines || !data.container_type || !data.ocean_freight) {
+      return res.status(400).json({
+        success: false,
+        message: 'Shipping line, container type, and ocean freight are required',
+      });
+    }
+    if (!data.commodity || !data.validity || !data.validity_for) {
+      return res.status(400).json({
+        success: false,
+        message: 'Commodity, validity, and validity_for are required',
       });
     }
 

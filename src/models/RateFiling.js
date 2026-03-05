@@ -12,7 +12,7 @@ const rateFilingSchema = new mongoose.Schema(
     // Port / Route Info
     por: {
       type: String,
-      default: "",
+      required: [true, "Port of Receipt is required"],
       trim: true,
     },
     pol: {
@@ -44,19 +44,19 @@ const rateFilingSchema = new mongoose.Schema(
     // Shipping Line & Container
     shipping_lines: {
       type: String,
-      default: "",
+      required: [true, "Shipping line is required"],
       trim: true,
     },
     container_type: {
       type: String,
-      default: "",
+      required: [true, "Container type is required"],
       trim: true,
     },
 
     // Freight & Charges
     ocean_freight: {
       type: String,
-      default: "",
+      required: [true, "Ocean freight is required"],
     },
     ocean_freight_currency: {
       type: String,
@@ -65,7 +65,6 @@ const rateFilingSchema = new mongoose.Schema(
     },
     acd_ens_afr_type: {
       type: String,
-      enum: ["ACD", "ENS", "AFR"],
       default: "ACD",
     },
     acd_ens_afr_value: {
@@ -76,6 +75,10 @@ const rateFilingSchema = new mongoose.Schema(
       type: String,
       default: "USD",
       trim: true,
+    },
+    acd_ens_afr: {
+      type: String,
+      default: "",
     },
     bl_fees: {
       type: String,
@@ -98,10 +101,28 @@ const rateFilingSchema = new mongoose.Schema(
       default: null,
     },
 
+    // Custom Charges
+    customLabel: {
+      type: String,
+      default: "",
+    },
+    customValue: {
+      type: String,
+      default: "",
+    },
+    customUnit: {
+      type: String,
+      default: "",
+    },
+    customCharges: {
+      type: String,
+      default: "",
+    },
+
     // Commodity
     commodity: {
       type: String,
-      default: "",
+      required: [true, "Commodity is required"],
       trim: true,
     },
 
@@ -130,11 +151,11 @@ const rateFilingSchema = new mongoose.Schema(
     // Validity
     validity: {
       type: String,
-      default: "",
+      required: [true, "Validity is required"],
     },
     validity_for: {
       type: String,
-      default: "",
+      required: [true, "Validity for is required"],
       trim: true,
     },
 
@@ -142,6 +163,12 @@ const rateFilingSchema = new mongoose.Schema(
     remarks: {
       type: String,
       default: "",
+    },
+
+    // Created By (User reference)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
   },
   {
