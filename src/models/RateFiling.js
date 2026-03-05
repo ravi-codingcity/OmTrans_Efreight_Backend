@@ -58,24 +58,7 @@ const rateFilingSchema = new mongoose.Schema(
       type: String,
       required: [true, "Ocean freight is required"],
     },
-    ocean_freight_currency: {
-      type: String,
-      default: "USD",
-      trim: true,
-    },
-    acd_ens_afr_type: {
-      type: String,
-      default: "ACD",
-    },
-    acd_ens_afr_value: {
-      type: String,
-      default: "",
-    },
-    acd_ens_afr_currency: {
-      type: String,
-      default: "USD",
-      trim: true,
-    },
+  
     acd_ens_afr: {
       type: String,
       default: "",
