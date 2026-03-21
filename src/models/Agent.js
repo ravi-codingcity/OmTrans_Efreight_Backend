@@ -32,6 +32,11 @@ const agentSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+     landlineNumber: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     personEmail: {
       type: String,
       default: "",

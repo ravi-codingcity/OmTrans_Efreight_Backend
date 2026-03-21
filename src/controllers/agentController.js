@@ -28,6 +28,9 @@ const HEADER_MAP = {
   'person designation': 'personDesignation',
   'contact number': 'contactNumber',
   'contact number (mobile / landline)': 'contactNumber',
+  'landline number': 'landlineNumber',
+  'landline number (landline)': 'landlineNumber',
+  'email': 'personEmail',
   'person email': 'personEmail',
   'remarks': 'remarks',
 };
