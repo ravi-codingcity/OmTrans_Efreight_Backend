@@ -33,6 +33,7 @@ const startServer = async () => {
     app.use('/api/quotations', require('./routes/quotationRoutes'));
     app.use('/api/rate-filings', require('./routes/rateFilingRoutes'));
     app.use('/api/pre-advice', require('./routes/preAdviceRoutes'));
+    app.use('/api/agents', require('./routes/agentRoutes'));
 
     // Health check
     app.get('/api/health', (req, res) => {
