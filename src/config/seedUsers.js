@@ -9,17 +9,10 @@ dotenv.config();
 const defaultUsers = [
   {
     username: 'vikram',
-    password: '123',
+    password: 'Ravi@108#',
     fullName: 'Vikram',
     role: 'Admin',
     location: 'Delhi',
-  },
-  {
-    username: 'ravi',
-    password: '123',
-    fullName: 'Ravi',
-    role: 'Manager',
-    location: 'Mumbai',
   },
 ];
 
@@ -52,8 +45,7 @@ const seedUsers = async () => {
     console.log('\nSeeding completed!');
     console.log('\nDefault Users:');
     console.log('----------------------------');
-    console.log('Username: vikram | Password: 123 | Role: Admin');
-    console.log('Username: ravi   | Password: 123 | Role: Manager');
+    console.log('Username: vikram | Password: Ravi@108# | Role: Admin');
     console.log('----------------------------\n');
 
     process.exit(0);
