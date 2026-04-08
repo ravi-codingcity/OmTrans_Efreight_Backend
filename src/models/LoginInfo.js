@@ -21,6 +21,10 @@ const loginInfoSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    logoutAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

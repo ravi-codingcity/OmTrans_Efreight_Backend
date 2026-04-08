@@ -54,7 +54,39 @@ const getAllLoginRecords = async (req, res) => {
   }
 };
 
+// @desc    Record user logout time
+// @route   PATCH /api/login-info/:id/logout
+// @access  Public (called from logout flow)
+const recordLogout = async (req, res) => {
+  try {
+    const record = await LoginInfo.findByIdAndUpdate(
+      req.params.id,
+      { logoutAt: new Date() },
+      { new: true }
+    );
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: "Login record not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Logout recorded",
+      data: record,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   createLoginRecord,
   getAllLoginRecords,
+  recordLogout,
 };
