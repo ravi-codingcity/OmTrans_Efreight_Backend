@@ -40,12 +40,16 @@ const createQuotation = async (req, res) => {
   }
 };
 
-// @desc    Get all quotations
+// @desc    Get all quotations (optionally filter by createdBy)
 // @route   GET /api/quotations
 // @access  Public
 const getAllQuotations = async (req, res) => {
   try {
-    const quotations = await Quotation.find().sort({ createdAt: -1 });
+    const filter = {};
+    if (req.query.createdBy) {
+      filter.createdBy = new RegExp(req.query.createdBy, 'i');
+    }
+    const quotations = await Quotation.find(filter).sort({ createdAt: -1 });
 
     res.json({
       success: true,
