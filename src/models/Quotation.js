@@ -214,6 +214,12 @@ const quotationSchema = new mongoose.Schema(
       default: "",
     },
 
+    // Rates Validity
+    ratesValidity: {
+      type: String,
+      default: "",
+    },
+
     // Draft and Status
     isDraft: {
       type: Boolean,
