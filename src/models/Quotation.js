@@ -72,8 +72,12 @@ const quotationSchema = new mongoose.Schema(
       default: Date.now,
     },
 
-    // Customer & Consignee
+    // Customer, Shipper & Consignee
     customerName: {
+      type: String,
+      default: "",
+    },
+    shipperName: {
       type: String,
       default: "",
     },
