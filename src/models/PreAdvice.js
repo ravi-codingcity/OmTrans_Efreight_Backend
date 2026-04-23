@@ -56,6 +56,11 @@ const preAdviceSchema = new mongoose.Schema(
     ddpBuying: { type: Number, default: 0 },
     ddpSelling: { type: Number, default: 0 },
 
+    // Rate Totals
+    totalBuying: { type: Number, default: 0 },
+    totalSelling: { type: Number, default: 0 },
+    totalMargin: { type: Number, default: 0 },
+
     // Remarks
     remarks: { type: String, default: "" },
 

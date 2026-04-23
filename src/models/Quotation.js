@@ -23,6 +23,12 @@ const chargeSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Per-container amounts for FCL multi-container (keyed by container type string)
+    containerAmounts: {
+      type: Map,
+      of: String,
+      default: {},
+    },
   },
   { _id: false }
 );
@@ -100,6 +106,17 @@ const quotationSchema = new mongoose.Schema(
     equipment: {
       type: String,
       default: "",
+    },
+    // FCL multi-container list: [{ type: "20ft Standard Container", qty: 1 }, ...]
+    equipmentList: {
+      type: [
+        {
+          type: { type: String, default: "" },
+          qty: { type: Number, default: 1 },
+          _id: false,
+        },
+      ],
+      default: [],
     },
     size: {
       type: String,
