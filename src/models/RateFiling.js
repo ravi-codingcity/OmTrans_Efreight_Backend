@@ -47,18 +47,30 @@ const rateFilingSchema = new mongoose.Schema(
       required: [true, "Shipping line is required"],
       trim: true,
     },
+    // Legacy single container (kept for backward compat; populated from first of container_types)
     container_type: {
       type: String,
-      required: [true, "Container type is required"],
+      default: "",
       trim: true,
+    },
+    // Multi-container support
+    container_types: {
+      type: [String],
+      default: [],
+    },
+    // Per-container charges: { "20ft Standard Container": { ocean_freight, ocean_freight_currency, acd_type, acd_currency, acd_value } }
+    containerCharges: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
     },
 
     // Freight & Charges
+    // Legacy single ocean_freight (backward compat; populated from first container)
     ocean_freight: {
       type: String,
-      required: [true, "Ocean freight is required"],
+      default: "",
     },
-  
+
     acd_ens_afr: {
       type: String,
       default: "",
@@ -138,7 +150,7 @@ const rateFilingSchema = new mongoose.Schema(
     },
     validity_for: {
       type: String,
-      required: [true, "Validity for is required"],
+      default: "",
       trim: true,
     },
 
