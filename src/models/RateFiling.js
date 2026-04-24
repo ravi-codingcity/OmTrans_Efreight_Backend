@@ -91,6 +91,11 @@ const rateFilingSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Per-container origin charges: { "20ft Standard Container": { bl_fees, thc, muc, toll } }
+    originChargeMap: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     railFreightRates: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
