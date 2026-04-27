@@ -15,17 +15,14 @@ const preAdviceSchema = new mongoose.Schema(
   {
     // Shipment
     jobNo: { type: String, required: [true, "Job number is required"] },
-    dateOfBooking: { type: String, default: "" },
     shippingLine: { type: String, default: "" },
     bookedBy: { type: String, default: "" },
     routing: { type: String, default: "" },
-    shipper: { type: String, default: "" },
     transitTime: { type: String, default: "" },
     equipmentSize: { type: String, default: "" },
     commodity: { type: String, default: "" },
     cargoWeight: { type: String, default: "" },
     forwarding: { type: String, default: "" },
-    noOfContainers: { type: String, default: "" },
     cha: { type: String, default: "" },
     transportation: { type: String, default: "" },
     term: { type: String, default: "" },
