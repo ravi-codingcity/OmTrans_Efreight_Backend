@@ -154,9 +154,9 @@ const quotationSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    cargoSize: {
-      type: String,
-      default: "",
+    cargoSizes: {
+      type: [String],
+      default: [],
     },
     cbm: {
       type: String,
