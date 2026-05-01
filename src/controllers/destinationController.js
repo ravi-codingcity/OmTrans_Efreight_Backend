@@ -1,4 +1,56 @@
 const Destination = require('../models/Destination');
+const RateFiling = require('../models/RateFiling');
+
+// ─── Fuzzy matching helpers (used for sync) ──────────────────────────────
+const normalizeDestination = (d) => {
+  if (!d) return '';
+  return String(d)
+    .toLowerCase()
+    .trim()
+    .replace(
+      /,?\s*(saudi arabia|argentina|australia|uae|bangladesh|angola|united arab emirates|cameron|china|india|germany|netherlands|belgium|italy|indonesia|ecuador|mexico|colombia|egypt|vietnam|sri lanka|russia|us|israel|france|uk|oman|united kingdom|usa|united states|peru|japan|uruguay|algeria|harbour|harbor|port|ny)$/i,
+      ''
+    )
+    .replace(/^(port of|port|harbor of|harbour of)\s+/i, '')
+    .replace(/[,.\-_()[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const calculateSimilarity = (a, b) => {
+  const A = normalizeDestination(a);
+  const B = normalizeDestination(b);
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  if (A.includes(B) || B.includes(A)) return 0.9;
+  const w1 = new Set(A.split(' ').filter((w) => w.length > 2));
+  const w2 = new Set(B.split(' ').filter((w) => w.length > 2));
+  if (w1.size === 0 || w2.size === 0) return 0;
+  const inter = [...w1].filter((x) => w2.has(x)).length;
+  const union = new Set([...w1, ...w2]).size;
+  return union ? inter / union : 0;
+};
+
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeShippingLineEntries = (input) => {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((entry) => {
+      if (!entry) return null;
+      if (typeof entry === 'string') {
+        const name = entry.trim();
+        return name ? { lineName: name, isActive: true } : null;
+      }
+      const name = String(entry.lineName || entry.name || '').trim();
+      if (!name) return null;
+      return {
+        lineName: name,
+        isActive: entry.isActive !== false,
+      };
+    })
+    .filter(Boolean);
+};
 
 // @desc    Get all destinations
 // @route   GET /api/destinations
@@ -6,11 +58,7 @@ const Destination = require('../models/Destination');
 const getAllDestinations = async (req, res) => {
   try {
     const destinations = await Destination.find().sort({ destinationName: 1 });
-    res.json({
-      success: true,
-      count: destinations.length,
-      data: destinations,
-    });
+    res.json({ success: true, count: destinations.length, data: destinations });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -24,17 +72,13 @@ const getActiveDestinations = async (req, res) => {
     const destinations = await Destination.find({ isActive: true }).sort({
       destinationName: 1,
     });
-    res.json({
-      success: true,
-      count: destinations.length,
-      data: destinations,
-    });
+    res.json({ success: true, count: destinations.length, data: destinations });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get single destination by ID
+// @desc    Get destination by id
 // @route   GET /api/destinations/:id
 // @access  Public
 const getDestinationById = async (req, res) => {
@@ -51,25 +95,21 @@ const getDestinationById = async (req, res) => {
   }
 };
 
-// @desc    Create destination (optionally with initial shipping lines)
+// @desc    Create a destination
 // @route   POST /api/destinations
 // @access  Public
 const createDestination = async (req, res) => {
   try {
-    const { destinationName, shippingLines = [], isActive } = req.body;
-
-    if (!destinationName || !destinationName.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Destination name is required',
-      });
+    const { destinationName, isActive, shippingLines } = req.body || {};
+    if (!destinationName || !String(destinationName).trim()) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'destinationName is required' });
     }
+    const name = String(destinationName).trim();
 
-    const trimmedName = destinationName.trim();
-
-    // Prevent case-insensitive duplicates
     const existing = await Destination.findOne({
-      destinationName: { $regex: `^${trimmedName}$`, $options: 'i' },
+      destinationName: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
     });
     if (existing) {
       return res.status(409).json({
@@ -79,26 +119,10 @@ const createDestination = async (req, res) => {
       });
     }
 
-    // Normalize shippingLines into [{lineName, isActive}]
-    const normalizedLines = (Array.isArray(shippingLines) ? shippingLines : [])
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item.trim() ? { lineName: item.trim() } : null;
-        }
-        if (item && typeof item === 'object' && item.lineName) {
-          return {
-            lineName: String(item.lineName).trim(),
-            isActive: item.isActive !== false,
-          };
-        }
-        return null;
-      })
-      .filter(Boolean);
-
     const destination = await Destination.create({
-      destinationName: trimmedName,
+      destinationName: name,
       isActive: isActive !== false,
-      shippingLines: normalizedLines,
+      shippingLines: normalizeShippingLineEntries(shippingLines),
     });
 
     res.status(201).json({
@@ -111,31 +135,33 @@ const createDestination = async (req, res) => {
   }
 };
 
-// @desc    Update destination
+// @desc    Update a destination (name / isActive only)
 // @route   PUT /api/destinations/:id
 // @access  Public
 const updateDestination = async (req, res) => {
   try {
-    const update = {};
-    if (typeof req.body.destinationName === 'string') {
-      update.destinationName = req.body.destinationName.trim();
-    }
-    if (typeof req.body.isActive === 'boolean') {
-      update.isActive = req.body.isActive;
-    }
-
-    const destination = await Destination.findByIdAndUpdate(
-      req.params.id,
-      update,
-      { new: true, runValidators: true }
-    );
-
+    const destination = await Destination.findById(req.params.id);
     if (!destination) {
       return res
         .status(404)
         .json({ success: false, message: 'Destination not found' });
     }
 
+    if (req.body?.destinationName !== undefined) {
+      const name = String(req.body.destinationName).trim();
+      if (!name) {
+        return res.status(400).json({
+          success: false,
+          message: 'destinationName cannot be empty',
+        });
+      }
+      destination.destinationName = name;
+    }
+    if (req.body?.isActive !== undefined) {
+      destination.isActive = !!req.body.isActive;
+    }
+
+    await destination.save();
     res.json({
       success: true,
       message: 'Destination updated successfully',
@@ -146,7 +172,7 @@ const updateDestination = async (req, res) => {
   }
 };
 
-// @desc    Delete destination
+// @desc    Delete a destination
 // @route   DELETE /api/destinations/:id
 // @access  Public
 const deleteDestination = async (req, res) => {
@@ -163,17 +189,18 @@ const deleteDestination = async (req, res) => {
   }
 };
 
-// @desc    Add a single shipping line to a destination
+// @desc    Add a shipping line to a destination
 // @route   POST /api/destinations/:id/shipping-lines
 // @access  Public
 const addShippingLine = async (req, res) => {
   try {
-    const { lineName } = req.body;
+    const { lineName, isActive } = req.body || {};
     if (!lineName || !String(lineName).trim()) {
       return res
         .status(400)
-        .json({ success: false, message: 'Shipping line name is required' });
+        .json({ success: false, message: 'lineName is required' });
     }
+    const name = String(lineName).trim();
 
     const destination = await Destination.findById(req.params.id);
     if (!destination) {
@@ -182,45 +209,41 @@ const addShippingLine = async (req, res) => {
         .json({ success: false, message: 'Destination not found' });
     }
 
-    const trimmed = String(lineName).trim();
-    const exists = destination.shippingLines.some(
-      (l) => l.lineName.toLowerCase() === trimmed.toLowerCase()
+    const dup = destination.shippingLines.find(
+      (l) => String(l.lineName).toLowerCase() === name.toLowerCase()
     );
-    if (exists) {
+    if (dup) {
       return res.status(409).json({
         success: false,
         message: 'Shipping line already exists for this destination',
       });
     }
 
-    destination.shippingLines.push({ lineName: trimmed });
+    destination.shippingLines.push({ lineName: name, isActive: isActive !== false });
     await destination.save();
 
-    const added = destination.shippingLines[destination.shippingLines.length - 1];
     res.status(201).json({
       success: true,
       message: 'Shipping line added successfully',
-      data: added,
-      destination,
+      data: destination,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Add multiple shipping lines at once
+// @desc    Bulk add shipping lines (skips duplicates)
 // @route   POST /api/destinations/:id/shipping-lines/bulk
 // @access  Public
 const addBulkShippingLines = async (req, res) => {
   try {
-    const { lineNames } = req.body;
-    if (!Array.isArray(lineNames) || lineNames.length === 0) {
+    const incoming = normalizeShippingLineEntries(req.body?.shippingLines);
+    if (incoming.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'lineNames must be a non-empty array',
+        message: 'shippingLines array is required',
       });
     }
-
     const destination = await Destination.findById(req.params.id);
     if (!destination) {
       return res
@@ -229,34 +252,33 @@ const addBulkShippingLines = async (req, res) => {
     }
 
     const existingLower = new Set(
-      destination.shippingLines.map((l) => l.lineName.toLowerCase())
+      destination.shippingLines.map((l) =>
+        String(l.lineName).toLowerCase().trim()
+      )
     );
     const added = [];
-    lineNames.forEach((raw) => {
-      if (typeof raw !== 'string') return;
-      const name = raw.trim();
-      if (!name) return;
-      if (existingLower.has(name.toLowerCase())) return;
-      destination.shippingLines.push({ lineName: name });
-      existingLower.add(name.toLowerCase());
-      added.push(name);
+    incoming.forEach((entry) => {
+      const key = entry.lineName.toLowerCase();
+      if (!existingLower.has(key)) {
+        destination.shippingLines.push(entry);
+        existingLower.add(key);
+        added.push(entry.lineName);
+      }
     });
 
-    await destination.save();
+    if (added.length > 0) await destination.save();
 
-    res.status(201).json({
+    res.json({
       success: true,
-      message: `${added.length} shipping line(s) added`,
-      data: destination.shippingLines,
-      added,
-      destination,
+      message: `${added.length} shipping line${added.length === 1 ? '' : 's'} added`,
+      data: { destination, added },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Update a shipping line on a destination
+// @desc    Update a single shipping line
 // @route   PUT /api/destinations/:id/shipping-lines/:shippingLineId
 // @access  Public
 const updateShippingLine = async (req, res) => {
@@ -267,34 +289,36 @@ const updateShippingLine = async (req, res) => {
         .status(404)
         .json({ success: false, message: 'Destination not found' });
     }
-
     const line = destination.shippingLines.id(req.params.shippingLineId);
     if (!line) {
       return res
         .status(404)
         .json({ success: false, message: 'Shipping line not found' });
     }
-
-    if (typeof req.body.lineName === 'string') {
-      line.lineName = req.body.lineName.trim();
+    if (req.body?.lineName !== undefined) {
+      const newName = String(req.body.lineName).trim();
+      if (!newName) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'lineName cannot be empty' });
+      }
+      line.lineName = newName;
     }
-    if (typeof req.body.isActive === 'boolean') {
-      line.isActive = req.body.isActive;
+    if (req.body?.isActive !== undefined) {
+      line.isActive = !!req.body.isActive;
     }
-
     await destination.save();
-
     res.json({
       success: true,
       message: 'Shipping line updated successfully',
-      data: line,
+      data: destination,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Remove a shipping line from a destination
+// @desc    Remove a shipping line
 // @route   DELETE /api/destinations/:id/shipping-lines/:shippingLineId
 // @access  Public
 const removeShippingLine = async (req, res) => {
@@ -305,20 +329,100 @@ const removeShippingLine = async (req, res) => {
         .status(404)
         .json({ success: false, message: 'Destination not found' });
     }
-
     const line = destination.shippingLines.id(req.params.shippingLineId);
     if (!line) {
       return res
         .status(404)
         .json({ success: false, message: 'Shipping line not found' });
     }
-
     line.deleteOne();
     await destination.save();
+    res.json({ success: true, message: 'Shipping line removed successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Sync shipping lines from existing rate filings for a given POD.
+//         Creates the destination doc if needed; adds any rate-filing
+//         shipping_lines values (exact + fuzzy POD match) not already present.
+// @route   POST /api/destinations/sync-from-rates
+// @access  Public
+const syncShippingLinesFromRates = async (req, res) => {
+  try {
+    const { destinationName } = req.body || {};
+    if (!destinationName || !String(destinationName).trim()) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'destinationName is required' });
+    }
+    const name = String(destinationName).trim();
+
+    let destination = await Destination.findOne({
+      destinationName: { $regex: `^${escapeRegex(name)}$`, $options: 'i' },
+    });
+    let createdDestination = false;
+    if (!destination) {
+      destination = await Destination.create({
+        destinationName: name,
+        shippingLines: [],
+      });
+      createdDestination = true;
+    }
+
+    // Find rate-filings whose POD fuzzy-matches this destination
+    const allPods = await RateFiling.distinct('pod');
+    const matchedPods = allPods.filter(
+      (p) => p && calculateSimilarity(name, p) >= 0.6
+    );
+
+    let rates = [];
+    if (matchedPods.length > 0) {
+      rates = await RateFiling.find(
+        { pod: { $in: matchedPods } },
+        { shipping_lines: 1, _id: 0 }
+      ).lean();
+    }
+
+    const fromRates = new Set();
+    rates.forEach((r) => {
+      if (r.shipping_lines) fromRates.add(String(r.shipping_lines).trim());
+    });
+
+    const existingLower = new Set(
+      (destination.shippingLines || []).map((l) =>
+        String(l.lineName || '').toLowerCase().trim()
+      )
+    );
+
+    const addedNames = [];
+    fromRates.forEach((line) => {
+      const key = line.toLowerCase();
+      if (key && !existingLower.has(key)) {
+        destination.shippingLines.push({ lineName: line, isActive: true });
+        existingLower.add(key);
+        addedNames.push(line);
+      }
+    });
+
+    if (addedNames.length > 0 || createdDestination) {
+      await destination.save();
+    }
 
     res.json({
       success: true,
-      message: 'Shipping line removed successfully',
+      message:
+        addedNames.length > 0
+          ? `Added ${addedNames.length} shipping line${addedNames.length === 1 ? '' : 's'} to ${destination.destinationName}`
+          : `No new shipping lines to add for ${destination.destinationName}`,
+      data: {
+        destination,
+        added: addedNames.length,
+        addedNames,
+        scannedPods: matchedPods,
+        scannedRates: rates.length,
+        createdDestination,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -336,4 +440,5 @@ module.exports = {
   addBulkShippingLines,
   updateShippingLine,
   removeShippingLine,
+  syncShippingLinesFromRates,
 };

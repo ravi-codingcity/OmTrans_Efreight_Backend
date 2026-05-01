@@ -10,12 +10,16 @@ const {
   addBulkShippingLines,
   updateShippingLine,
   removeShippingLine,
+  syncShippingLinesFromRates,
 } = require('../controllers/destinationController');
 
 const router = express.Router();
 
 // Active destinations — must be before /:id
 router.get('/active', getActiveDestinations);
+
+// Sync shipping lines for a POD from existing rate filings
+router.post('/sync-from-rates', syncShippingLinesFromRates);
 
 // Destination CRUD
 router.get('/', getAllDestinations);
