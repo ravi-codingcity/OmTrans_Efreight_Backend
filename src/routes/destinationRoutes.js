@@ -11,6 +11,7 @@ const {
   updateShippingLine,
   removeShippingLine,
   syncShippingLinesFromRates,
+  bulkUploadExcel,
 } = require('../controllers/destinationController');
 
 const router = express.Router();
@@ -20,6 +21,9 @@ router.get('/active', getActiveDestinations);
 
 // Sync shipping lines for a POD from existing rate filings
 router.post('/sync-from-rates', syncShippingLinesFromRates);
+
+// Bulk upload from Excel (array of {shippingLine, destination} rows)
+router.post('/bulk-upload', bulkUploadExcel);
 
 // Destination CRUD
 router.get('/', getAllDestinations);

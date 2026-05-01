@@ -429,6 +429,111 @@ const syncShippingLinesFromRates = async (req, res) => {
   }
 };
 
+// @desc    Bulk upload shipping-line / destination pairs (from Excel)
+// @route   POST /api/destinations/bulk-upload
+// @access  Public
+const bulkUploadExcel = async (req, res) => {
+  try {
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: '`rows` array is required' });
+    }
+
+    // Filter out rows missing either field
+    const validRows = rows.filter(
+      (r) =>
+        r &&
+        String(r.shippingLine || '').trim() &&
+        String(r.destination || '').trim()
+    );
+    if (validRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'No valid rows found. Each row must have "shippingLine" and "destination".',
+      });
+    }
+
+    // Group lines by destination name (case-insensitive key, preserve first-seen casing)
+    const byDest = new Map(); // key: normalised name → { canonical, lines[] }
+    validRows.forEach((r) => {
+      const dest = String(r.destination).trim();
+      const line = String(r.shippingLine).trim();
+      const key = dest.toLowerCase();
+      if (!byDest.has(key)) byDest.set(key, { canonical: dest, lines: [] });
+      byDest.get(key).lines.push(line);
+    });
+
+    let totalAdded = 0;
+    let totalSkipped = 0;
+    const details = [];
+
+    for (const { canonical, lines } of byDest.values()) {
+      // Find existing destination (case-insensitive)
+      let destination = await Destination.findOne({
+        destinationName: {
+          $regex: `^${escapeRegex(canonical)}$`,
+          $options: 'i',
+        },
+      });
+      let isNew = false;
+      if (!destination) {
+        destination = await Destination.create({
+          destinationName: canonical,
+          shippingLines: [],
+        });
+        isNew = true;
+      }
+
+      const existingLower = new Set(
+        destination.shippingLines.map((l) =>
+          String(l.lineName).toLowerCase().trim()
+        )
+      );
+
+      const added = [];
+      const skipped = [];
+      lines.forEach((line) => {
+        const key = line.toLowerCase().trim();
+        if (!existingLower.has(key)) {
+          destination.shippingLines.push({ lineName: line, isActive: true });
+          existingLower.add(key);
+          added.push(line);
+        } else {
+          skipped.push(line);
+        }
+      });
+
+      if (added.length > 0) await destination.save();
+
+      totalAdded += added.length;
+      totalSkipped += skipped.length;
+      details.push({
+        destination: canonical,
+        isNew,
+        added: added.length,
+        skipped: skipped.length,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Upload complete: ${totalAdded} added, ${totalSkipped} duplicate${totalSkipped !== 1 ? 's' : ''} skipped`,
+      data: {
+        total: validRows.length,
+        added: totalAdded,
+        skipped: totalSkipped,
+        destinationsProcessed: byDest.size,
+        details,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getAllDestinations,
   getActiveDestinations,
@@ -441,4 +546,5 @@ module.exports = {
   updateShippingLine,
   removeShippingLine,
   syncShippingLinesFromRates,
+  bulkUploadExcel,
 };
