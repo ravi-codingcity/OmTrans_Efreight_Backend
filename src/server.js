@@ -35,6 +35,7 @@ const startServer = async () => {
     app.use('/api/pre-advice', require('./routes/preAdviceRoutes'));
     app.use('/api/agents', require('./routes/agentRoutes'));
     app.use('/api/login-info', require('./routes/loginInfoRoutes'));
+    app.use('/api/destinations', require('./routes/destinationRoutes'));
 
     // Health check
     app.get('/api/health', (req, res) => {
