@@ -25,7 +25,18 @@ const rateFilingSchema = new mongoose.Schema(
       required: [true, "Port of Discharge is required"],
       trim: true,
     },
+    // Legacy combined "Final Destination (Rail Ramp)" field (kept for backward compat with old records)
     fdrr: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    finalDestination: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    railRamp: {
       type: String,
       default: "",
       trim: true,
