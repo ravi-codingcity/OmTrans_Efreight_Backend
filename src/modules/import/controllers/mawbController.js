@@ -163,8 +163,8 @@ const downloadMawbDocument = async (req, res) => {
       return res.status(403).json({ success: false, message: "Not authorized to access this record" });
     }
     const html = renderMawbHtml(record);
-    const mawbNo = (record.airline_information && record.airline_information.mawb_number) || record._id;
-    const fileName = `AWB-Instruction-${String(mawbNo).replace(/[^\w-]+/g, "_")}.doc`;
+    const ref = record.hawb_nos || record._id;
+    const fileName = `AWB-Instruction-${String(ref).replace(/[^\w-]+/g, "_")}.doc`;
     res.setHeader("Content-Type", "application/msword");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     res.send(html);

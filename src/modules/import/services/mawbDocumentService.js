@@ -1,154 +1,50 @@
 /* ------------------------------------------------------------------ */
 /*  MAWB document service                                             */
 /*                                                                    */
-/*  - sanitizeMawbPayload : normalize an incoming body into the model */
-/*    shape (defensive defaults, type coercion).                      */
-/*  - buildDocumentModel  : produce a clean, fully-mapped document    */
-/*    object for preview / client rendering.                          */
-/*  - renderMawbHtml      : render the AWB Instruction as HTML (used  */
-/*    for Word-compatible .doc download straight from the backend).   */
+/*  Reproduces the OmTrans "AWB INSTRUCTION" template EXACTLY. Only   */
+/*  the 16 user-fillable fields are populated; every other template   */
+/*  box is preserved but left blank. No custom layout is introduced.  */
 /* ------------------------------------------------------------------ */
 
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
-const num = (v) => {
-  const n = Number(v);
-  return isNaN(n) ? 0 : n;
-};
-const arr = (v) => (Array.isArray(v) ? v : []);
 
-const sanitizeMawbPayload = (body = {}, user = {}) => {
-  const s = body.shipper || {};
-  const c = body.consignee || {};
-  const n = body.notify_party || {};
-  const a = body.airline_information || {};
-  const r = body.routing_information || {};
-  const val = body.valuation_information || {};
-  const sd = body.shipment_details || {};
-  const ch = body.charges || {};
-  const dec = body.shipper_declaration || {};
+// The 16 fillable fields, sanitized into the model shape.
+const sanitizeMawbPayload = (body = {}, user = {}) => ({
+  shipper: str(body.shipper),
+  consignee: str(body.consignee),
+  notify: str(body.notify),
+  from_routing: str(body.from_routing),
+  to_routing: str(body.to_routing),
+  freight: str(body.freight) || "PP",
+  hawb_nos: str(body.hawb_nos),
+  airport_of_destination: str(body.airport_of_destination),
+  handling_information: str(body.handling_information),
+  no_of_pcs: str(body.no_of_pcs),
+  gross_weight: str(body.gross_weight),
+  chargeable_weight: str(body.chargeable_weight),
+  nature_of_goods: str(body.nature_of_goods),
+  hsn_code: str(body.hsn_code),
+  goods_dimension: str(body.goods_dimension),
+  date: str(body.date),
+  status: body.status === "submitted" ? "submitted" : "draft",
+  createdBy: str(body.createdBy) || str(user.fullName) || str(user.username),
+  createdByRole: str(body.createdByRole) || str(user.role),
+  createdByLocation: str(body.createdByLocation) || str(user.location),
+});
 
-  return {
-    shipper: {
-      company_name: str(s.company_name),
-      address_line_1: str(s.address_line_1),
-      address_line_2: str(s.address_line_2),
-      city: str(s.city),
-      state: str(s.state),
-      postal_code: str(s.postal_code),
-      country: str(s.country),
-      phone: str(s.phone),
-      fax: str(s.fax),
-      contact_person: str(s.contact_person),
-      email: str(s.email),
-    },
-    consignee: {
-      company_name: str(c.company_name),
-      address_line_1: str(c.address_line_1),
-      address_line_2: str(c.address_line_2),
-      city: str(c.city),
-      state: str(c.state),
-      postal_code: str(c.postal_code),
-      country: str(c.country),
-      phone: str(c.phone),
-      contact_person: str(c.contact_person),
-      email: str(c.email),
-    },
-    notify_party: {
-      company_name: str(n.company_name),
-      address: str(n.address),
-      city: str(n.city),
-      country: str(n.country),
-      phone: str(n.phone),
-      email: str(n.email),
-      contact_person: str(n.contact_person),
-    },
-    airline_information: {
-      airline_name: str(a.airline_name),
-      mawb_number: str(a.mawb_number),
-      freight_payment: str(a.freight_payment) || "PP",
-      iata_agent_code: str(a.iata_agent_code),
-      account_number: str(a.account_number),
-    },
-    routing_information: {
-      airport_of_departure: str(r.airport_of_departure),
-      departure_airport_code: str(r.departure_airport_code),
-      airport_of_destination: str(r.airport_of_destination),
-      destination_airport_code: str(r.destination_airport_code),
-      first_carrier: str(r.first_carrier),
-      routing: arr(r.routing).map((leg) => ({
-        from: str(leg.from),
-        to: str(leg.to),
-        carrier: str(leg.carrier),
-      })),
-      flight_number: str(r.flight_number),
-      flight_date: str(r.flight_date),
-    },
-    valuation_information: {
-      currency: str(val.currency) || "INR",
-      charges_code: str(val.charges_code),
-      declared_value_for_carriage: str(val.declared_value_for_carriage),
-      declared_value_for_customs: str(val.declared_value_for_customs),
-      insurance_amount: str(val.insurance_amount),
-      insurance_currency: str(val.insurance_currency),
-    },
-    shipment_details: {
-      hawb_numbers: arr(sd.hawb_numbers).map(str).filter(Boolean),
-      total_packages: num(sd.total_packages),
-      gross_weight: num(sd.gross_weight),
-      chargeable_weight: num(sd.chargeable_weight),
-      commodity_item_number: str(sd.commodity_item_number),
-      rate_per_kg: num(sd.rate_per_kg),
-      total_freight_charge: num(sd.total_freight_charge),
-      nature_of_goods: str(sd.nature_of_goods),
-      dimensions: arr(sd.dimensions).map((d) => ({
-        length_cm: num(d.length_cm),
-        width_cm: num(d.width_cm),
-        height_cm: num(d.height_cm),
-        pieces: num(d.pieces),
-      })),
-      volume_cbm: num(sd.volume_cbm),
-    },
-    charges: {
-      prepaid_collect: str(ch.prepaid_collect) || "PREPAID",
-      valuation_charge: num(ch.valuation_charge),
-      tax: num(ch.tax),
-      other_charges_due_agent: num(ch.other_charges_due_agent),
-      other_charges_due_carrier: num(ch.other_charges_due_carrier),
-      total_prepaid: num(ch.total_prepaid),
-      total_collect: num(ch.total_collect),
-      currency_conversion_rate: num(ch.currency_conversion_rate),
-      collect_charges_destination_currency: num(
-        ch.collect_charges_destination_currency
-      ),
-    },
-    shipper_declaration: {
-      place: str(dec.place),
-      execution_date: str(dec.execution_date),
-      authorized_signatory: str(dec.authorized_signatory),
-      signature: str(dec.signature),
-    },
-    status: body.status === "submitted" ? "submitted" : "draft",
-    createdBy: str(body.createdBy) || str(user.fullName) || str(user.username),
-    createdByRole: str(body.createdByRole) || str(user.role),
-    createdByLocation: str(body.createdByLocation) || str(user.location),
-  };
+// Special logic: HSN Code + Goods Dimension are appended into the single
+// "Nature & quantity of goods (incl. dimensions or volume)" template box.
+const buildNatureOfGoods = (o = {}) => {
+  const lines = [];
+  if (str(o.nature_of_goods)) lines.push(str(o.nature_of_goods));
+  if (str(o.hsn_code)) lines.push(`HSN Code: ${str(o.hsn_code)}`);
+  if (str(o.goods_dimension)) lines.push(`Dimensions: ${str(o.goods_dimension)}`);
+  return lines.join("\n");
 };
 
-// Flattened, fully-mapped document model for preview / client rendering.
 const buildDocumentModel = (doc) => {
   const o = doc && typeof doc.toObject === "function" ? doc.toObject() : doc || {};
-  return {
-    id: o._id,
-    title: "AWB INSTRUCTION",
-    company: {
-      name: "OM TRANS LOGISTICS LTD",
-      address:
-        "159, TRANSPORT CENTRE, PUNJABI BAGH, (NEAR PUNJABI BAGH FLY OVER) NEW DELHI-110035",
-      phone: "011-28316541,42,43",
-      fax: "011-28316548",
-    },
-    ...o,
-  };
+  return { id: o._id, ...o, nature_combined: buildNatureOfGoods(o) };
 };
 
 const esc = (v) =>
@@ -156,81 +52,137 @@ const esc = (v) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+const nl2br = (v) => esc(v).replace(/\n/g, "<br>");
 
-// Render a Word-compatible HTML representation of the AWB Instruction.
+/* ------------------------------------------------------------------ */
+/*  Exact AWB INSTRUCTION template (HTML — Word/preview compatible)   */
+/*  Box/label order mirrors the uploaded MAWB FORMAT.doc precisely.   */
+/* ------------------------------------------------------------------ */
 const renderMawbHtml = (doc) => {
-  const m = buildDocumentModel(doc);
-  const s = m.shipper || {};
-  const c = m.consignee || {};
-  const n = m.notify_party || {};
-  const a = m.airline_information || {};
-  const r = m.routing_information || {};
-  const v = m.valuation_information || {};
-  const sd = m.shipment_details || {};
-  const ch = m.charges || {};
-  const dec = m.shipper_declaration || {};
-
-  const addr = (p) =>
-    [p.address_line_1, p.address_line_2, [p.city, p.state, p.postal_code].filter(Boolean).join(", "), p.country]
-      .filter(Boolean)
-      .map(esc)
-      .join("<br>");
-
-  const cell = "border:1px solid #000;padding:6px;font-size:12px;vertical-align:top;";
-  const label = `${cell}background:#f0f0f0;font-weight:bold;width:160px;`;
+  const o = buildDocumentModel(doc);
+  const b = "border:1px solid #000;";
+  const cell = `${b}padding:5px;font-size:11px;vertical-align:top;`;
+  const lbl = "font-size:9px;color:#333;font-weight:bold;text-transform:uppercase;display:block;margin-bottom:2px;";
 
   return `<!DOCTYPE html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
-<head><meta charset="utf-8"><title>AWB Instruction ${esc(a.mawb_number)}</title></head>
-<body style="font-family:Arial,sans-serif;">
-  <h2 style="text-align:center;margin:0 0 4px;">AWB INSTRUCTION</h2>
-  <p style="text-align:center;margin:0 0 12px;font-size:12px;">
-    <strong>${esc(m.company.name)}</strong><br>${esc(m.company.address)}<br>
-    PH: ${esc(m.company.phone)} &nbsp; FAX: ${esc(m.company.fax)}
-  </p>
-  <table style="border-collapse:collapse;width:100%;margin-bottom:10px;">
-    <tr><td style="${label}">SHIPPER</td><td style="${cell}"><strong>${esc(s.company_name)}</strong><br>${addr(s)}<br>${esc(s.contact_person)} ${s.phone ? "| " + esc(s.phone) : ""} ${s.email ? "| " + esc(s.email) : ""}</td></tr>
-    <tr><td style="${label}">CONSIGNEE</td><td style="${cell}"><strong>${esc(c.company_name)}</strong><br>${addr(c)}<br>${esc(c.contact_person)} ${c.phone ? "| " + esc(c.phone) : ""} ${c.email ? "| " + esc(c.email) : ""}</td></tr>
-    <tr><td style="${label}">NOTIFY</td><td style="${cell}"><strong>${esc(n.company_name)}</strong><br>${esc(n.address)}<br>${[n.city, n.country].filter(Boolean).map(esc).join(", ")} ${n.phone ? "| " + esc(n.phone) : ""}</td></tr>
-  </table>
-  <table style="border-collapse:collapse;width:100%;margin-bottom:10px;">
-    <tr><td style="${label}">Airline</td><td style="${cell}">${esc(a.airline_name)}</td><td style="${label}">Freight</td><td style="${cell}">${esc(a.freight_payment)}</td></tr>
-    <tr><td style="${label}">MAWB No</td><td style="${cell}">${esc(a.mawb_number)}</td><td style="${label}">HAWB Nos</td><td style="${cell}">${(sd.hawb_numbers || []).map(esc).join(", ")}</td></tr>
-    <tr><td style="${label}">IATA Code</td><td style="${cell}">${esc(a.iata_agent_code)}</td><td style="${label}">Account No</td><td style="${cell}">${esc(a.account_number)}</td></tr>
-  </table>
-  <table style="border-collapse:collapse;width:100%;margin-bottom:10px;">
-    <tr><td style="${label}">Airport of Departure</td><td style="${cell}">${esc(r.airport_of_departure)} ${r.departure_airport_code ? "(" + esc(r.departure_airport_code) + ")" : ""}</td><td style="${label}">Airport of Destination</td><td style="${cell}">${esc(r.airport_of_destination)} ${r.destination_airport_code ? "(" + esc(r.destination_airport_code) + ")" : ""}</td></tr>
-    <tr><td style="${label}">First Carrier</td><td style="${cell}">${esc(r.first_carrier)}</td><td style="${label}">Flight / Date</td><td style="${cell}">${esc(r.flight_number)} ${r.flight_date ? "/ " + esc(r.flight_date) : ""}</td></tr>
-    <tr><td style="${label}">Currency</td><td style="${cell}">${esc(v.currency)}</td><td style="${label}">Chgs Code</td><td style="${cell}">${esc(v.charges_code)}</td></tr>
-    <tr><td style="${label}">Declared Value (Carriage)</td><td style="${cell}">${esc(v.declared_value_for_carriage)}</td><td style="${label}">Declared Value (Customs)</td><td style="${cell}">${esc(v.declared_value_for_customs)}</td></tr>
-    <tr><td style="${label}">Amount of Insurance</td><td style="${cell}">${esc(v.insurance_amount)} ${esc(v.insurance_currency)}</td><td style="${label}">Volume (CBM)</td><td style="${cell}">${esc(sd.volume_cbm)}</td></tr>
-  </table>
-  <table style="border-collapse:collapse;width:100%;margin-bottom:10px;">
+<head><meta charset="utf-8"><title>AWB Instruction</title></head>
+<body style="font-family:Arial,sans-serif;color:#000;">
+  <div style="text-align:center;font-size:16px;font-weight:bold;margin-bottom:6px;">AWB INSTRUCTION</div>
+  <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+    <!-- SHIPPER + Accounting Information -->
     <tr>
-      <td style="${label}">No. of Pcs</td><td style="${cell}">${esc(sd.total_packages)}</td>
-      <td style="${label}">Gross Weight</td><td style="${cell}">${esc(sd.gross_weight)}</td>
-      <td style="${label}">Chargeable Weight</td><td style="${cell}">${esc(sd.chargeable_weight)}</td>
+      <td style="${cell}width:55%;height:90px;">
+        <span style="${lbl}">Shipper</span>${nl2br(o.shipper)}
+      </td>
+      <td style="${cell}width:45%;">
+        <span style="${lbl}">Accounting Information</span>
+        FREIGHT: ${esc(o.freight)}<br>
+        HAWB NOS: ${esc(o.hawb_nos)}<br>
+        Agent's IATA Code:<br>
+        Account number:
+      </td>
     </tr>
+    <!-- CONSIGNEE -->
+    <tr><td style="${cell}height:80px;" colspan="2"><span style="${lbl}">Consignee</span>${nl2br(o.consignee)}</td></tr>
+    <!-- NOTIFY -->
+    <tr><td style="${cell}height:70px;" colspan="2"><span style="${lbl}">Notify</span>${nl2br(o.notify)}</td></tr>
+    <!-- Airport of departure & requested routing -->
     <tr>
-      <td style="${label}">Commd. Item No.</td><td style="${cell}">${esc(sd.commodity_item_number)}</td>
-      <td style="${label}">Rate / Charge</td><td style="${cell}">${esc(sd.rate_per_kg)}</td>
-      <td style="${label}">Total</td><td style="${cell}">${esc(sd.total_freight_charge)}</td>
+      <td style="${cell}" colspan="2">
+        <span style="${lbl}">Airport of departure (Address of first carrier) &amp; requested routing</span>
+        <table style="width:100%;border-collapse:collapse;margin-top:3px;">
+          <tr>
+            <td style="${b}padding:3px;font-size:10px;width:33%;"><span style="${lbl}">From</span>${esc(o.from_routing)}</td>
+            <td style="${b}padding:3px;font-size:10px;width:33%;"><span style="${lbl}">By First Carrier</span></td>
+            <td style="${b}padding:3px;font-size:10px;width:34%;"><span style="${lbl}">To</span>${esc(o.to_routing)}</td>
+          </tr>
+        </table>
+        <table style="width:100%;border-collapse:collapse;margin-top:3px;">
+          <tr>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Currency</span>INR</td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Chgs Code</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Declared Value for carriage</span>NVD</td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Declared value for customs</span>NCV</td>
+          </tr>
+        </table>
+      </td>
     </tr>
-    <tr><td style="${label}">Nature &amp; Qty of Goods</td><td style="${cell}" colspan="5">${esc(sd.nature_of_goods)}</td></tr>
+    <!-- Airport of Destination / Flight / Date / Insurance -->
+    <tr>
+      <td style="${cell}" colspan="2">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="${b}padding:3px;font-size:10px;width:40%;"><span style="${lbl}">Airport of Destination</span>${esc(o.airport_of_destination)}</td>
+            <td style="${b}padding:3px;font-size:10px;width:20%;"><span style="${lbl}">Flight</span></td>
+            <td style="${b}padding:3px;font-size:10px;width:20%;"><span style="${lbl}">Date</span>${esc(o.date)}</td>
+            <td style="${b}padding:3px;font-size:10px;width:20%;"><span style="${lbl}">Amount of insurance</span></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <!-- Handling Information -->
+    <tr><td style="${cell}height:40px;" colspan="2"><span style="${lbl}">Handling Information</span>${nl2br(o.handling_information)}</td></tr>
+    <!-- Rate / cargo line -->
+    <tr>
+      <td style="${cell}" colspan="2">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">No. of Pcs</span>${esc(o.no_of_pcs)}</td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Gross Weight</span>${esc(o.gross_weight)}</td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Commd. Item No.</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Chargeable weight</span>${esc(o.chargeable_weight)}</td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Rate/Charge</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Total</span></td>
+          </tr>
+          <tr>
+            <td style="${b}padding:5px;font-size:10px;height:90px;vertical-align:top;" colspan="6">
+              <span style="${lbl}">Nature &amp; quantity of goods (incl. dimensions or volume)</span>
+              ${nl2br(o.nature_combined)}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <!-- Charges summary (template fields, left blank) -->
+    <tr>
+      <td style="${cell}" colspan="2">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Prepaid</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Collect</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Other Charges</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Valuation Charge</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Tax</span></td>
+          </tr>
+          <tr>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Total other charges Due agent</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Total other charges Due carrier</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Total prepaid</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Total</span></td>
+            <td style="${b}padding:3px;font-size:9px;"><span style="${lbl}">Currency Conv. Rates</span></td>
+          </tr>
+          <tr>
+            <td style="${b}padding:3px;font-size:9px;" colspan="5"><span style="${lbl}">Coll. Chgs. In dest currency</span></td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <!-- Footer / declaration (fixed template text) -->
+    <tr>
+      <td style="${cell}" colspan="2">
+        Executed on &nbsp; Date: ${esc(o.date)} &nbsp;&nbsp; Place: ____________________<br><br>
+        <strong>OMTRANS LOGISTICS LTD</strong><br>
+        Signature of Shipper or his Agent
+      </td>
+    </tr>
   </table>
-  <table style="border-collapse:collapse;width:100%;margin-bottom:10px;">
-    <tr><td style="${label}">Prepaid / Collect</td><td style="${cell}">${esc(ch.prepaid_collect)}</td><td style="${label}">Valuation Charge</td><td style="${cell}">${esc(ch.valuation_charge)}</td></tr>
-    <tr><td style="${label}">Tax</td><td style="${cell}">${esc(ch.tax)}</td><td style="${label}">Total Other Chgs (Agent)</td><td style="${cell}">${esc(ch.other_charges_due_agent)}</td></tr>
-    <tr><td style="${label}">Total Other Chgs (Carrier)</td><td style="${cell}">${esc(ch.other_charges_due_carrier)}</td><td style="${label}">Total Prepaid</td><td style="${cell}">${esc(ch.total_prepaid)}</td></tr>
-    <tr><td style="${label}">Total Collect</td><td style="${cell}">${esc(ch.total_collect)}</td><td style="${label}">Currency Conv. Rate</td><td style="${cell}">${esc(ch.currency_conversion_rate)}</td></tr>
-    <tr><td style="${label}">Coll. Chgs. in Dest. Currency</td><td style="${cell}" colspan="3">${esc(ch.collect_charges_destination_currency)}</td></tr>
-  </table>
-  <p style="font-size:12px;margin-top:18px;">
-    Executed on (Date): ${esc(dec.execution_date)} &nbsp;&nbsp; Place: ${esc(dec.place)}<br><br>
-    <strong>OMTRANS LOGISTICS LTD</strong><br>
-    Signature of Shipper or his Agent: ${esc(dec.authorized_signatory)}
-  </p>
 </body></html>`;
 };
 
-module.exports = { sanitizeMawbPayload, buildDocumentModel, renderMawbHtml };
+module.exports = {
+  sanitizeMawbPayload,
+  buildDocumentModel,
+  buildNatureOfGoods,
+  renderMawbHtml,
+};
