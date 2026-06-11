@@ -37,6 +37,9 @@ const startServer = async () => {
     app.use('/api/login-info', require('./routes/loginInfoRoutes'));
     app.use('/api/destinations', require('./routes/destinationRoutes'));
 
+    // Import module (isolated) — MAWB Instruction documents
+    app.use('/api/import/mawb', require('./modules/import/routes/mawbRoutes'));
+
     // Health check
     app.get('/api/health', (req, res) => {
       res.json({ success: true, message: 'Server running' });
