@@ -31,9 +31,10 @@ const hawbImportSchema = new mongoose.Schema(
     chargeable_weight: { type: String, default: "", trim: true },
 
     // Nature & Quantity of Goods — these combine into one template box
-    hsn_code: { type: String, default: "", trim: true },
+    nature_of_goods: { type: String, default: "", trim: true },
     invoice_no: { type: String, default: "", trim: true },
-    nature_date: { type: String, default: "", trim: true },
+    invoice_date: { type: String, default: "", trim: true },
+    hsn_code: { type: String, default: "", trim: true },
     dimension: { type: String, default: "", trim: true },
     volume_wt: { type: String, default: "", trim: true },
 

@@ -26,9 +26,10 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
   gross_weight: str(body.gross_weight),
   chargeable_weight: str(body.chargeable_weight),
 
-  hsn_code: str(body.hsn_code),
+  nature_of_goods: str(body.nature_of_goods),
   invoice_no: str(body.invoice_no),
-  nature_date: str(body.nature_date),
+  invoice_date: str(body.invoice_date),
+  hsn_code: str(body.hsn_code),
   dimension: str(body.dimension),
   volume_wt: str(body.volume_wt),
 
@@ -40,16 +41,20 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
   createdByLocation: str(body.createdByLocation) || str(user.location),
 });
 
-// Special logic: HSN Code, Invoice No, Date, Dimension, Volume WT are combined
-// into the single "Nature and Quantity of Goods (Incl. Dimensions or Value)" box.
+// Nature of Goods, Invoice No, Invoice Date, HSN Code, Dimension and Volume WT
+// are combined into the single "Nature and Quantity of Goods (Incl. Dimensions
+// or Value)" box, as grouped blocks separated by blank lines.
 const buildNatureOfGoods = (o = {}) => {
-  const lines = [];
-  if (str(o.hsn_code)) lines.push(`HSN Code: ${str(o.hsn_code)}`);
-  if (str(o.invoice_no)) lines.push(`Invoice No: ${str(o.invoice_no)}`);
-  if (str(o.nature_date)) lines.push(`Date: ${str(o.nature_date)}`);
-  if (str(o.dimension)) lines.push(`Dimension: ${str(o.dimension)}`);
-  if (str(o.volume_wt)) lines.push(`Volume WT: ${str(o.volume_wt)}`);
-  return lines.join("\n");
+  const groups = [];
+  if (str(o.nature_of_goods)) groups.push(str(o.nature_of_goods));
+  const inv = [];
+  if (str(o.invoice_no)) inv.push(`INV. NO: ${str(o.invoice_no)}`);
+  if (str(o.invoice_date)) inv.push(`DT. ${str(o.invoice_date)}`);
+  if (inv.length) groups.push(inv.join("\n"));
+  if (str(o.hsn_code)) groups.push(`HSCODE: ${str(o.hsn_code)}`);
+  if (str(o.dimension)) groups.push(`DIMS IN CMS:\n${str(o.dimension)}`);
+  if (str(o.volume_wt)) groups.push(`VOLUME WT: ${str(o.volume_wt)}`);
+  return groups.join("\n\n");
 };
 
 const buildDocumentModel = (doc) => {
