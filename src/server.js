@@ -39,6 +39,8 @@ const startServer = async () => {
 
     // Import module (isolated) — MAWB Instruction documents
     app.use('/api/import/mawb', require('./modules/import/routes/mawbRoutes'));
+    // Import module (isolated) — HAWB (House Air Waybill) documents
+    app.use('/api/import/hawb', require('./modules/import/hawb/routes/hawbRoutes'));
 
     // Health check
     app.get('/api/health', (req, res) => {
