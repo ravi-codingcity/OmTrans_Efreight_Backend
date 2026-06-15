@@ -25,6 +25,14 @@ const hawbImportSchema = new mongoose.Schema(
     routing_to: { type: String, default: "", trim: true },
     routing_airport_of_destination: { type: String, default: "", trim: true },
 
+    // Handling Information (defaults to the standard boilerplate; editable)
+    handling_information: {
+      type: String,
+      default:
+        "BOXES ADDED AND MKD.// ONE ENV CONTG DOCS ( H.AWB, MANIFEST, INVOICE, PACKING LIST ) ATTD WITH THE SHPT.",
+      trim: true,
+    },
+
     // Shipment Details
     no_of_pieces: { type: String, default: "", trim: true },
     gross_weight: { type: String, default: "", trim: true },
