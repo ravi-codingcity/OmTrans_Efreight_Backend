@@ -15,7 +15,7 @@ const validateHawb = (data, opts = {}) => {
   if (status === "submitted" || opts.requireSubmitted) {
     if (isBlank(data.shipper)) errors.push("Shipper is required");
     if (isBlank(data.consignee)) errors.push("Consignee is required");
-    if (isBlank(data.house_awb_number)) errors.push("House Air Waybill Number is required");
+    // House AWB Number is optional — no validation.
   }
   return { valid: errors.length === 0, errors };
 };

@@ -40,6 +40,8 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
   routing_to: str(body.routing_to),
   routing_airport_of_destination: str(body.routing_airport_of_destination),
 
+  freight: str(body.freight),
+
   handling_information:
     body.handling_information !== undefined ? str(body.handling_information) : DEFAULT_HANDLING,
 
@@ -53,6 +55,8 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
   hsn_code: str(body.hsn_code),
   dimension: str(body.dimension),
   volume_wt: str(body.volume_wt),
+  shipping_bill_no: str(body.shipping_bill_no),
+  shipping_bill_date: str(body.shipping_bill_date),
 
   dated: str(body.dated),
 
@@ -75,6 +79,10 @@ const buildNatureOfGoods = (o = {}) => {
   if (str(o.hsn_code)) groups.push(`HSCODE: ${str(o.hsn_code)}`);
   if (str(o.dimension)) groups.push(`DIMS IN CMS:\n${str(o.dimension)}`);
   if (str(o.volume_wt)) groups.push(`VOLUME WT: ${str(o.volume_wt)}`);
+  const sb = [];
+  if (str(o.shipping_bill_no)) sb.push(`SHIPPING BILL NO: ${str(o.shipping_bill_no)}`);
+  if (str(o.shipping_bill_date)) sb.push(`DATE: ${formatDMY(o.shipping_bill_date)}`);
+  if (sb.length) groups.push(sb.join("\n"));
   return groups.join("\n\n");
 };
 

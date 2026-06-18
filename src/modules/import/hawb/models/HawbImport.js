@@ -25,6 +25,9 @@ const hawbImportSchema = new mongoose.Schema(
     routing_to: { type: String, default: "", trim: true },
     routing_airport_of_destination: { type: String, default: "", trim: true },
 
+    // Freight type — "" | "Prepaid" | "Collect" (drives PP/CC + AS AGREED)
+    freight: { type: String, default: "", trim: true },
+
     // Handling Information (defaults to the standard boilerplate; editable)
     handling_information: {
       type: String,
@@ -45,6 +48,8 @@ const hawbImportSchema = new mongoose.Schema(
     hsn_code: { type: String, default: "", trim: true },
     dimension: { type: String, default: "", trim: true },
     volume_wt: { type: String, default: "", trim: true },
+    shipping_bill_no: { type: String, default: "", trim: true },
+    shipping_bill_date: { type: String, default: "", trim: true },
 
     // Final field — the "Dated" box
     dated: { type: String, default: "", trim: true },
