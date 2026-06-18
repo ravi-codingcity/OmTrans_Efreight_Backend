@@ -23,7 +23,7 @@ const validateMawb = (data, opts = {}) => {
   if (status === "submitted" || opts.requireSubmitted) {
     if (isBlank(data.shipper)) errors.push("Shipper is required");
     if (isBlank(data.consignee)) errors.push("Consignee is required");
-    if (isBlank(data.hawb_nos)) errors.push("HAWB Nos is required");
+    // HAWB Nos is optional — no validation.
   }
 
   return { valid: errors.length === 0, errors };
