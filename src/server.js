@@ -42,6 +42,12 @@ const startServer = async () => {
     // Import module (isolated) — HAWB (House Air Waybill) documents
     app.use('/api/import/hawb', require('./modules/import/hawb/routes/hawbRoutes'));
 
+    // Export-AI module (isolated) — Gemini document analysis + jobs.
+    // Reuses the existing Mongo connection, User model and JWT auth.
+    const { aiRoutes, jobRoutes } = require('./modules/exportAi');
+    app.use('/api/ai', aiRoutes);
+    app.use('/api/jobs', jobRoutes);
+
     // Health check
     app.get('/api/health', (req, res) => {
       res.json({ success: true, message: 'Server running' });

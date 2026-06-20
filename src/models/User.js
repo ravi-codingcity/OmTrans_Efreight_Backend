@@ -34,6 +34,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Export-AI module: per-user preferred Gemini model (optional, additive).
+    preferredAiModel: {
+      type: String,
+      default: 'gemini-2.5-flash',
+    },
   },
   {
     timestamps: true,

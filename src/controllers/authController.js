@@ -241,10 +241,40 @@ const adminResetPassword = async (req, res) => {
   }
 };
 
+// @desc    Update per-user preferences (Export-AI: preferred Gemini model)
+// @route   PATCH /api/auth/preferences
+// @access  Private
+const updatePreferences = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (typeof req.body.preferredAiModel === 'string' && req.body.preferredAiModel.trim()) {
+      user.preferredAiModel = req.body.preferredAiModel.trim();
+    }
+    await user.save();
+    res.json({
+      success: true,
+      user: {
+        _id: user._id,
+        username: user.username,
+        fullName: user.fullName,
+        role: user.role,
+        location: user.location,
+        preferredAiModel: user.preferredAiModel,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
   updateProfile,
   adminResetPassword,
+  updatePreferences,
 };
