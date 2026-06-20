@@ -59,6 +59,7 @@ const jobSchema = new mongoose.Schema(
     shipmentReport: {
       pdfPath: String,
       docxPath: String,
+      pdfEngine: String, // 'word' | 'libreoffice' | 'fallback' | 'none'
       data: { type: mongoose.Schema.Types.Mixed },
       aiData: { type: mongoose.Schema.Types.Mixed },
       generated: { type: Boolean, default: false },
@@ -69,6 +70,7 @@ const jobSchema = new mongoose.Schema(
     mbl: {
       pdfPath: String,
       docxPath: String,
+      pdfEngine: String,
       data: { type: mongoose.Schema.Types.Mixed },
       generated: { type: Boolean, default: false },
       generatedAt: Date,
@@ -78,6 +80,7 @@ const jobSchema = new mongoose.Schema(
     isf: {
       pdfPath: String,
       docxPath: String,
+      pdfEngine: String,
       data: { type: mongoose.Schema.Types.Mixed },
       generated: { type: Boolean, default: false },
       generatedAt: Date,

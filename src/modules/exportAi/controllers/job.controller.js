@@ -207,13 +207,14 @@ const generateReport = asyncHandler(async (req, res) => {
   const sr = await generateHblReports(job._id, job.shipmentReport.data);
   job.shipmentReport.pdfPath = sr.pdfPath;
   job.shipmentReport.docxPath = sr.docxPath;
+  job.shipmentReport.pdfEngine = sr.pdfEngine;
   job.shipmentReport.generated = true;
   job.shipmentReport.generatedAt = new Date();
   const hbl = job.shipmentReport.data && job.shipmentReport.data.hblNumber;
   if (typeof hbl === "string" && hbl.trim()) job.hblNumber = hbl.trim();
   job.markModified("shipmentReport");
   await job.save();
-  res.json({ success: true, generated: true, pdf: Boolean(sr.pdfPath), docx: Boolean(sr.docxPath) });
+  res.json({ success: true, generated: true, pdf: Boolean(sr.pdfPath), docx: Boolean(sr.docxPath), pdfEngine: sr.pdfEngine });
 });
 
 /** Load (deriving once from the HBL) the MBL data for editing. */
@@ -229,7 +230,7 @@ const getMblData = asyncHandler(async (req, res) => {
     job.markModified("mbl");
     await job.save();
   }
-  res.json({ success: true, data: job.mbl.data, generated: Boolean(job.mbl.generated), jobNumber: job.jobNumber });
+  res.json({ success: true, data: job.mbl.data, generated: Boolean(job.mbl.generated), pdfEngine: job.mbl.pdfEngine, jobNumber: job.jobNumber });
 });
 
 /** Generate the final MBL Word + PDF from the (edited) MBL data. */
@@ -241,11 +242,12 @@ const generateMblReport = asyncHandler(async (req, res) => {
   const mr = await generateMblReports(job._id, job.mbl.data);
   job.mbl.pdfPath = mr.pdfPath;
   job.mbl.docxPath = mr.docxPath;
+  job.mbl.pdfEngine = mr.pdfEngine;
   job.mbl.generated = true;
   job.mbl.generatedAt = new Date();
   job.markModified("mbl");
   await job.save();
-  res.json({ success: true, generated: true, pdf: Boolean(mr.pdfPath), docx: Boolean(mr.docxPath) });
+  res.json({ success: true, generated: true, pdf: Boolean(mr.pdfPath), docx: Boolean(mr.docxPath), pdfEngine: mr.pdfEngine });
 });
 
 /** Load (deriving once from the finalized HBL/MBL + Booking doc) the ISF data. */
@@ -261,7 +263,7 @@ const getIsfData = asyncHandler(async (req, res) => {
     job.markModified("isf");
     await job.save();
   }
-  res.json({ success: true, data: job.isf.data, generated: Boolean(job.isf.generated), jobNumber: job.jobNumber });
+  res.json({ success: true, data: job.isf.data, generated: Boolean(job.isf.generated), pdfEngine: job.isf.pdfEngine, jobNumber: job.jobNumber });
 });
 
 /** Generate the final ISF Word + PDF from the (edited) ISF data. */
@@ -273,11 +275,12 @@ const generateIsfReport = asyncHandler(async (req, res) => {
   const ir = await generateIsfReports(job._id, job.isf.data);
   job.isf.pdfPath = ir.pdfPath;
   job.isf.docxPath = ir.docxPath;
+  job.isf.pdfEngine = ir.pdfEngine;
   job.isf.generated = true;
   job.isf.generatedAt = new Date();
   job.markModified("isf");
   await job.save();
-  res.json({ success: true, generated: true, pdf: Boolean(ir.pdfPath), docx: Boolean(ir.docxPath) });
+  res.json({ success: true, generated: true, pdf: Boolean(ir.pdfPath), docx: Boolean(ir.docxPath), pdfEngine: ir.pdfEngine });
 });
 
 const downloadReport = asyncHandler(async (req, res) => {

@@ -269,6 +269,7 @@ try {
   } finally {
     try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
   }
+  return "word";
 }
 
 function convertWithLibreOffice(docxPath, pdfPath) {
@@ -292,7 +293,7 @@ function convertWithLibreOffice(docxPath, pdfPath) {
       const produced = path.join(outDir, `${path.basename(docxPath, path.extname(docxPath))}.pdf`);
       if (produced !== pdfPath && fs.existsSync(produced)) fs.renameSync(produced, pdfPath);
       if (!fs.existsSync(pdfPath)) throw new Error("LibreOffice ran but produced no PDF");
-      return;
+      return "libreoffice";
     } catch (err) {
       const detail = err && err.stderr ? String(err.stderr).trim() : err.message;
       lastErr = new Error(`${bin}: ${detail}`);
@@ -303,8 +304,18 @@ function convertWithLibreOffice(docxPath, pdfPath) {
   throw lastErr || new Error("No LibreOffice binary found for PDF conversion");
 }
 
+// Convert the filled DOCX to PDF using a real office engine (Word on Windows,
+// LibreOffice elsewhere). Returns the engine name so callers know the PDF is a
+// faithful render of the template (vs. the built-in approximation fallback).
 function convertToPdf(docxPath, pdfPath) {
-  return process.platform === "win32" ? convertWithWord(docxPath, pdfPath) : convertWithLibreOffice(docxPath, pdfPath);
+  // Allow LibreOffice on Windows too when explicitly configured.
+  if (process.platform === "win32" && !process.env.SOFFICE_PATH) return convertWithWord(docxPath, pdfPath);
+  try {
+    return convertWithLibreOffice(docxPath, pdfPath);
+  } catch (err) {
+    if (process.platform === "win32") return convertWithWord(docxPath, pdfPath);
+    throw err;
+  }
 }
 
 async function generateReports(jobId, data, { templatePath, prefix, fallback, ...numbers }) {
@@ -315,18 +326,21 @@ async function generateReports(jobId, data, { templatePath, prefix, fallback, ..
   await fillTemplate(data, docxPath, { templatePath, ...numbers });
 
   try {
-    convertToPdf(docxPath, pdfPath);
-    return { docxPath, pdfPath };
+    const pdfEngine = convertToPdf(docxPath, pdfPath) || "office";
+    return { docxPath, pdfPath, pdfEngine };
   } catch (err) {
     const engine = process.platform === "win32" ? "MS Word" : "LibreOffice";
     logger.warn(`${prefix} PDF via ${engine} unavailable — using built-in PDF fallback`, { error: err.message });
   }
+  // No office engine available. Produce an approximate PDF so the server still
+  // has *something*, but flag it 'fallback' so the client renders the real DOCX
+  // template instead for a faithful preview/PDF.
   try {
     await fallback(pdfPath);
-    return { docxPath, pdfPath };
+    return { docxPath, pdfPath, pdfEngine: "fallback" };
   } catch (err) {
     logger.error(`${prefix} fallback PDF rendering failed — DOCX only`, { error: err.message });
-    return { docxPath, pdfPath: undefined };
+    return { docxPath, pdfPath: undefined, pdfEngine: "none" };
   }
 }
 

@@ -72,18 +72,18 @@ async function generateIsfReports(jobId, data) {
   const pdfPath = path.join(dir, "isf-report.pdf");
   fs.writeFileSync(docxPath, await renderIsfBuffer(data));
   try {
-    convertToPdf(docxPath, pdfPath);
-    return { docxPath, pdfPath };
+    const pdfEngine = convertToPdf(docxPath, pdfPath) || "office";
+    return { docxPath, pdfPath, pdfEngine };
   } catch (err) {
     const engine = process.platform === "win32" ? "MS Word" : "LibreOffice";
     logger.warn(`ISF PDF via ${engine} unavailable — using built-in PDF fallback`, { error: err.message });
   }
   try {
     await renderIsfPdf(pdfPath, data);
-    return { docxPath, pdfPath };
+    return { docxPath, pdfPath, pdfEngine: "fallback" };
   } catch (err) {
     logger.error("ISF fallback PDF rendering failed — DOCX only", { error: err.message });
-    return { docxPath, pdfPath: undefined };
+    return { docxPath, pdfPath: undefined, pdfEngine: "none" };
   }
 }
 
