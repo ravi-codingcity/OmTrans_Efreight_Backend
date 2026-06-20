@@ -7,6 +7,7 @@ const { aiConfig } = require("../config/aiConfig");
 const { ensureDir } = require("../utils/files");
 const { logger } = require("../config/logger");
 const { renderShipmentPdf } = require("./fallbackPdf.service");
+const { overlayShipmentPdf, overlayAvailable } = require("./pdfOverlay.service");
 
 // Master templates — stored once, loaded per request, never overwritten.
 const HBL_TEMPLATE_PATH = path.resolve(__dirname, "../templates/HBL Format Sample.docx");
@@ -318,23 +319,29 @@ function convertToPdf(docxPath, pdfPath) {
   }
 }
 
-async function generateReports(jobId, data, { templatePath, prefix, fallback, ...numbers }) {
+async function generateReports(jobId, data, { templatePath, prefix, fallback, overlay, ...numbers }) {
   const dir = ensureDir(path.resolve(aiConfig.reportDir, String(jobId)));
   const docxPath = path.join(dir, `${prefix}.docx`);
   const pdfPath = path.join(dir, `${prefix}.pdf`);
 
   await fillTemplate(data, docxPath, { templatePath, ...numbers });
 
-  try {
-    const pdfEngine = convertToPdf(docxPath, pdfPath) || "office";
-    return { docxPath, pdfPath, pdfEngine };
-  } catch (err) {
-    const engine = process.platform === "win32" ? "MS Word" : "LibreOffice";
-    logger.warn(`${prefix} PDF via ${engine} unavailable — using built-in PDF fallback`, { error: err.message });
+  // Highest fidelity & fully portable (no MS Word / LibreOffice): overlay the
+  // populated values onto the ORIGINAL template PDF with PyMuPDF. Borders,
+  // tables, fonts, margins and header/footer come straight from the template.
+  if (overlay && overlayAvailable()) {
+    try {
+      overlayShipmentPdf(overlay, data, pdfPath, numbers);
+      return { docxPath, pdfPath, pdfEngine: "overlay" };
+    } catch (err) {
+      logger.warn(`${prefix} PDF template overlay failed — using built-in fallback`, { error: err.message });
+    }
+  } else if (overlay) {
+    logger.warn(`${prefix} PDF overlay unavailable (install Python + PyMuPDF) — using built-in fallback`);
   }
-  // No office engine available. Produce an approximate PDF so the server still
-  // has *something*, but flag it 'fallback' so the client renders the real DOCX
-  // template instead for a faithful preview/PDF.
+
+  // Last-resort approximate PDF, flagged 'fallback' so the client can instead
+  // render the real DOCX template for a faithful preview/PDF.
   try {
     await fallback(pdfPath);
     return { docxPath, pdfPath, pdfEngine: "fallback" };
@@ -348,6 +355,7 @@ function generateHblReports(jobId, data, opts = {}) {
   return generateReports(jobId, data, {
     templatePath: HBL_TEMPLATE_PATH,
     prefix: "hbl-report",
+    overlay: "hbl",
     hblNumber: opts.hblNumber != null ? opts.hblNumber : data.hblNumber,
     bookingNumber: opts.bookingNumber != null ? opts.bookingNumber : data.bookingNumber,
     fallback: (pdfPath) => renderShipmentPdf(pdfPath, data, { title: "HOUSE BILL OF LADING", numberLabel: "HBL No.", numberKey: "hblNumber" }),
@@ -358,6 +366,7 @@ function generateMblReports(jobId, data, opts = {}) {
   return generateReports(jobId, data, {
     templatePath: MBL_TEMPLATE_PATH,
     prefix: "mbl-report",
+    overlay: "mbl",
     mblNumber: opts.mblNumber != null ? opts.mblNumber : data.mblNumber,
     fallback: (pdfPath) => renderShipmentPdf(pdfPath, data, { title: "MASTER BILL OF LADING", numberLabel: "MBL No.", numberKey: "mblNumber" }),
   });

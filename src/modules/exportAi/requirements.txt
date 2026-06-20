@@ -1,0 +1,14 @@
+# Export-AI module — Python dependency for high-fidelity HBL/MBL PDF generation.
+#
+# The HBL/MBL PDFs are produced by overlaying the populated shipment data directly
+# onto the original template PDFs (templates/HBL Format Sample.pdf, MBL Format
+# Sample.pdf) using PyMuPDF — no MS Word or LibreOffice required. The borders,
+# tables, fonts, margins and header/footer come straight from the templates.
+#
+# Install on the server that runs the Node backend:
+#     pip install -r requirements.txt
+#
+# Optionally point the backend at a specific interpreter with the PYTHON_PATH env
+# var (otherwise it auto-detects python / python3 / py).
+
+PyMuPDF>=1.24
