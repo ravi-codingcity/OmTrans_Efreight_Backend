@@ -38,9 +38,12 @@ abbreviations and alternate field names to the canonical keys. Examples (non-exh
 - "Shipper", "Exporter", "Seller", "From" -> exporter_name
 - "Consignee", "Buyer", "Bill To", "To" -> consignee_name
 - "Notify", "Notify Party", "Also Notify" -> notify_party
-- "Container No", "CNTR", "Equipment No" -> container_number / containers[].containerNo
-- "Seal No", "Carrier Seal", "Line Seal No.", "Custom Seal No." -> seal_number / containers[].sealNo / seals[]
-- "GW", "Gross Wt" -> total_gross_weight ; "NW", "Net Wt" -> total_net_weight
+- "Container No", "CONTAINER NUMBER", "CNTR", "Equipment No" -> container_number / containers[].containerNo
+- "Seal No", "Carrier Seal" -> seal_number / containers[].sealNo / seals[]
+- "Liner Seal No.", "Line Seal No.", "Shipping Line Seal" -> liner_seal_number / containers[].linerSeal / seals[]
+- "Customs Seal No.", "Custom Seal No.", "Cust Seal No." -> customs_seal_number / containers[].customsSeal / seals[]
+- "Freight", "PREPAID", "COLLECT", "FREIGHT PREPAID", "FREIGHT COLLECT", "Freight Terms" -> freight (keep the ORIGINAL wording verbatim)
+- "GW", "Gross Wt" -> total_gross_weight ; "NW", "Net Wt", "Net Weight" -> total_net_weight
 - "CBM", "Measurement", "Volume" -> gross_measurement
 - "HS Code", "HSN", "HTS", "Tariff No" -> hs_code / hsCodes[]
 - "Vessel", "Ocean Vessel" -> vessel_name ; "Voyage", "Voy No" -> voyage_number
@@ -52,11 +55,16 @@ abbreviations and alternate field names to the canonical keys. Examples (non-exh
 - ESTIMATED ARRIVAL -> vessel_eta (capture "PORT, COUNTRY, DD/MM/YYYY").
 
 DOCUMENT TYPE:
+- "Shipping Instruction", "Shipping Instructions", "Bill of Lading Instructions", "B/L Instructions" -> detectedType="shipping_instruction" (HIGH-PRIORITY source).
 - "Shipping Bill", "LEO", "Let Export Order", "INDIAN CUSTOMS EDI SYSTEM" -> detectedType="shipping_bill" (primary source).
 - "Booking Confirmation", "Booking Note" -> detectedType="booking_confirmation".
 - "Forwarding Note" -> detectedType="forwarding_note".
 - "Form 10", "FORM 10" -> detectedType="form_10".
 - "Form 13", "Form 6", "SEZ 4 E-Gatepass", "E-GATE FORM" -> detectedType="egate".
+
+SHIPPING INSTRUCTION: this is the authoritative source for Shipper/Consignee/Notify Party
+addresses, Container No. / Liner Seal No. / Customs Seal No., the FREIGHT term (e.g. "FREIGHT
+PREPAID"/"COLLECT" — keep verbatim) and Net Weight. Extract all of these whenever present.
 
 ADDRESS RULE: capture the COMPLETE address verbatim into exporter_address / consignee_address /
 notify_party_address — never truncate. For notify party, put the full company name in notify_party
@@ -75,7 +83,7 @@ Return ONLY a JSON object with this exact shape:
   },
   "hsCodes": [ string ],
   "seals": [ string ],
-  "containers": [ { "containerNo": string, "sealNo": string, "size": string, "marks": string, "packages": string, "weight": string } ],
+  "containers": [ { "containerNo": string, "sealNo": string, "linerSeal": string, "customsSeal": string, "size": string, "marks": string, "packages": string, "weight": string } ],
   "lineItems": [ { "description": string, "quantity": string, "unitPrice": string, "amount": string, "hsCode": string } ],
   "notes": string
 }
@@ -165,7 +173,7 @@ async function extractDocument({ filePath, mimeType, originalName, model }) {
     fields: parsed.fields || {},
     hsCodes: Array.isArray(parsed.hsCodes) ? parsed.hsCodes.filter(Boolean).map(String) : [],
     seals: Array.isArray(parsed.seals) ? parsed.seals.filter(Boolean).map(String) : [],
-    containers: Array.isArray(parsed.containers) ? parsed.containers.filter((c) => c && (c.containerNo || c.sealNo)) : [],
+    containers: Array.isArray(parsed.containers) ? parsed.containers.filter((c) => c && (c.containerNo || c.sealNo || c.linerSeal || c.customsSeal)) : [],
     lineItems: Array.isArray(parsed.lineItems) ? parsed.lineItems : [],
     notes: parsed.notes || "",
     usedModel,

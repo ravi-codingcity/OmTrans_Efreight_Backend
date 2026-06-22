@@ -18,6 +18,7 @@ const DOC_TYPES = Object.freeze([
   "commercial_invoice",
   "packing_list",
   "bill_of_lading",
+  "shipping_instruction", // Shipping Instruction / Bill of Lading Instructions (high-priority source)
   "certificate_of_origin",
   "letter_of_credit",
   "shipping_bill",
@@ -50,6 +51,8 @@ const CANONICAL_FIELDS = Object.freeze([
   "shipping_bill_number", "shipping_bill_date", "iec_number", "exporter_address",
   "consignee_address", "container_size", "number_of_containers",
   "vessel_etd", "vessel_eta",
+  // Shipping Instruction specific
+  "freight", "liner_seal_number", "customs_seal_number",
 ]);
 
 const OUTPUT_TEMPLATES = Object.freeze({

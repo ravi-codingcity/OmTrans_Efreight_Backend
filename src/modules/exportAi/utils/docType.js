@@ -5,6 +5,7 @@
  */
 function detectDocTypeFromName(name = "") {
   const s = String(name).toLowerCase();
+  if (/shipping\s*instruction|b\/?l\s*instruction|bill\s*of\s*lading\s*instruction/.test(s)) return "shipping_instruction";
   if (/shipping\s*bill|\bsb\b|\bleo\b|let\s*export|customs\s*edi/.test(s)) return "shipping_bill";
   if (/booking/.test(s)) return "booking_confirmation";
   if (/forwarding/.test(s)) return "forwarding_note";

@@ -1,5 +1,5 @@
 const { SHIPMENT_REPORT_TEMPLATE } = require("../config/templates");
-const { isPriorityDoc } = require("./comparison.service");
+const { isPriorityDoc, isShippingInstruction } = require("./comparison.service");
 
 /* ------------------------------------------------------------------ */
 /*  Full shipment-report data builder (ported faithfully).            */
@@ -20,6 +20,9 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   const fields = consolidated.fields || {};
   const tmpl = SHIPMENT_REPORT_TEMPLATE;
 
+  // Shipping Instruction / Bill of Lading Instructions — highest-priority source for
+  // Shipper/Consignee/Notify, Container & Seal numbers, Freight term and Net Weight.
+  const siDocs = documents.filter(isShippingInstruction);
   const sbDocs = documents.filter(isPriorityDoc);
   const goodsDocs = sbDocs.length ? sbDocs : documents;
   const bookingDocs = documents.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || ""));
@@ -37,16 +40,26 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   const isMumbai = String(options.location || "").trim().toLowerCase() === "mumbai";
   const extraSealDocs = isMumbai ? egateDocs : fwdDocs;
   const sealRule = isMumbai ? "Mumbai" : "Delhi";
-  const sealDocs = [...sbDocs, ...extraSealDocs];
+  // Seal-source priority (per location):
+  //   Delhi : Shipping Instruction → LEO/Shipping Bill/EDI → Forwarding Note
+  //   Mumbai: Shipping Instruction → LEO/Shipping Bill/EDI → E-Gate (Form 13/6/SEZ 4)
+  const sealDocs = [...siDocs, ...sbDocs, ...extraSealDocs];
 
-  const docRank = (d) => (isPriorityDoc(d) ? 0 : fwdDocs.includes(d) ? 1 : 2);
+  const docRank = (d) => (isShippingInstruction(d) ? 0 : isPriorityDoc(d) ? 1 : fwdDocs.includes(d) ? 2 : 3);
   const orderedDocs = [...documents].sort((a, b) => docRank(a) - docRank(b));
   const pushUnique = (arr, v) => { if (!isEmpty(v) && !arr.some((x) => normKey(x) === normKey(v))) arr.push(String(v).trim()); };
 
-  const sbContainerNos = [];
-  sbDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(sbContainerNos, c.containerNo)));
-  sbDocs.forEach((d) => pushUnique(sbContainerNos, d.extractedFields && d.extractedFields.container_number));
-  let containerNos = sbContainerNos;
+  // Container numbers: prefer the Shipping Instruction, then the Shipping Bill,
+  // then any other document, then the consolidated field.
+  const containersFromDocs = (docs) => {
+    const nos = [];
+    docs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(nos, c.containerNo)));
+    docs.forEach((d) => pushUnique(nos, d.extractedFields && d.extractedFields.container_number));
+    return nos;
+  };
+  const siContainerNos = containersFromDocs(siDocs);
+  const sbContainerNos = containersFromDocs(sbDocs);
+  let containerNos = siContainerNos.length ? siContainerNos : sbContainerNos;
   if (!containerNos.length) {
     containerNos = [];
     orderedDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(containerNos, c.containerNo)));
@@ -62,7 +75,12 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     const arr = sealsByContainer.get(k);
     if (!arr.some((s) => normKey(s) === normKey(v))) arr.push(v);
   };
-  sealDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => addSealTo(c.containerNo, c.sealNo)));
+  // Liner Seal No. and Customs Seal No. are both captured (SI provides them per row).
+  sealDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
+    addSealTo(c.containerNo, c.sealNo);
+    addSealTo(c.containerNo, c.linerSeal);
+    addSealTo(c.containerNo, c.customsSeal);
+  }));
 
   const weightByContainer = new Map();
   const packagesByContainer = new Map();
@@ -75,9 +93,15 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
 
   const sealPool = [];
   sealDocs.forEach((d) => {
-    ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(sealPool, cleanSeal(c.sealNo)));
+    ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
+      pushUnique(sealPool, cleanSeal(c.sealNo));
+      pushUnique(sealPool, cleanSeal(c.linerSeal));
+      pushUnique(sealPool, cleanSeal(c.customsSeal));
+    });
     ((d.rawExtraction && d.rawExtraction.seals) || []).forEach((s) => pushUnique(sealPool, cleanSeal(s)));
     pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.seal_number));
+    pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.liner_seal_number));
+    pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.customs_seal_number));
   });
 
   const containers = containerNos.map((no) => ({
@@ -88,10 +112,15 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   }));
   const usedSeals = new Set();
   containers.forEach((c) => c.seals.forEach((s) => usedSeals.add(normKey(s))));
-  const orphanSeals = sealPool.filter((s) => !usedSeals.has(normKey(s)));
-  if (orphanSeals.length) {
-    if (containers.length) orphanSeals.forEach((s) => { containers[0].seals.push(s); usedSeals.add(normKey(s)); });
-    else containers.push({ containerNo: "", seals: orphanSeals });
+  // Pool any seals not already tied to a container — but NOT when the Shipping
+  // Instruction supplied the containers/seals (its values are authoritative, so we
+  // must not bleed unrelated seals from other documents onto its containers).
+  if (!siContainerNos.length) {
+    const orphanSeals = sealPool.filter((s) => !usedSeals.has(normKey(s)));
+    if (orphanSeals.length) {
+      if (containers.length) orphanSeals.forEach((s) => { containers[0].seals.push(s); usedSeals.add(normKey(s)); });
+      else containers.push({ containerNo: "", seals: orphanSeals });
+    }
   }
 
   const prodMap = new Map();
@@ -142,8 +171,12 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   addLine("sbNo", "Shipping Bill No.", sbNo);
   addLine("sbDate", "Shipping Bill Date", sbDate);
   addLine("iec", "IEC / BR Number", iec);
-  addLine("netWt", "Net WT", "", { always: true, blank: true });
-  addLine("freight", "FREIGHT", "", { always: true, blank: true });
+  // Net WT — only from the Shipping Instruction (never calculated from other docs).
+  const siNetWt = firstVal(siDocs, "total_net_weight");
+  addLine("netWt", "Net WT", siNetWt, { always: true, blank: isEmpty(siNetWt) });
+  // FREIGHT — preserve the SI's original wording (PREPAID/COLLECT/etc.); else blank.
+  const siFreight = firstVal(siDocs, "freight");
+  addLine("freight", "FREIGHT", siFreight, { always: true, blank: isEmpty(siFreight) });
   const renderDescLine = (l) => {
     const v = isEmpty(l.value) ? (l.blank ? BLANK_LINE : "") : l.value;
     return l.label ? `${l.label}: ${v}` : v;
@@ -231,6 +264,24 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     }
     if (isEmpty(value)) return { label: d.label, value: NOT_FOUND, found: false, wide: !!d.wide };
     return { label: d.label, value: String(value), found: true, wide: !!d.wide };
+  });
+
+  // Shipping Instruction priority for Shipper / Consignee / Notify Party: when the SI
+  // provides these, they win; otherwise the values above (LEO / Shipping Bill / EDI)
+  // are kept as the fallback.
+  const siAddress = (nameKey, addrKey) => {
+    let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
+    parts = parts.filter((p, i) => !parts.some((o, j) => j !== i && o.toLowerCase().includes(p.toLowerCase())));
+    return parts.join("\n");
+  };
+  const siOverrides = {
+    "Shipper / Exporter": siAddress("exporter_name", "exporter_address"),
+    Consignee: siAddress("consignee_name", "consignee_address"),
+    "Notify Party": siAddress("notify_party", "notify_party_address"),
+  };
+  summary.forEach((s) => {
+    const ov = siOverrides[s.label];
+    if (!isEmpty(ov)) { s.value = ov; s.found = true; s.blank = false; }
   });
 
   const vesselEtd = firstVal(bookingDocs, "vessel_etd");

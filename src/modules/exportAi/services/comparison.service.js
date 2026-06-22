@@ -21,6 +21,17 @@ function isPriorityDoc(doc) {
   return /shipping\s*bill|\bleo\b|let export order|indian customs edi/.test(hay);
 }
 
+/**
+ * Shipping Instruction / Bill of Lading Instructions — the high-priority source for
+ * Shipper/Consignee/Notify addresses, Container & Seal numbers, Freight term and Net
+ * Weight. (It does NOT override every field; see shipmentReport.service.js.)
+ */
+function isShippingInstruction(doc) {
+  if (doc && doc.detectedType === "shipping_instruction") return true;
+  const hay = `${(doc && doc.originalName) || ""} ${(doc && doc.rawExtraction && doc.rawExtraction.notes) || ""}`.toLowerCase();
+  return /shipping\s*instruction|bill\s*of\s*lading\s*instruction|b\/?l\s*instruction/.test(hay);
+}
+
 function reconcileDocuments(documents) {
   const comparison = [];
   const discrepancies = [];
@@ -74,4 +85,4 @@ function reconcileDocuments(documents) {
   return { consolidated, comparison, discrepancies, missingFields, validationScore };
 }
 
-module.exports = { isPriorityDoc, reconcileDocuments };
+module.exports = { isPriorityDoc, isShippingInstruction, reconcileDocuments };
