@@ -6,6 +6,7 @@ const { DEFAULT_MODEL, resolveModel } = require("../config/aiModels");
 const { fileToBase64 } = require("../utils/files");
 const { detectDocTypeFromName } = require("../utils/docType");
 const { buildMockExtraction } = require("./mock.service");
+const { prepareForGemini } = require("./extractText.service");
 
 function describeAiError(err) {
   const m = String((err && err.message) || err || "");
@@ -153,13 +154,20 @@ async function extractDocument({ filePath, mimeType, originalName, model }) {
   if (aiConfig.gemini.mockMode) {
     return { ...buildMockExtraction({ originalName, mimeType }), usedModel: "mock", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
   }
-  const base64 = await fileToBase64(filePath);
+
+  // Office formats (DOC/DOCX/XLS/XLSX/CSV) are not valid Gemini inline uploads — we
+  // extract & normalize their text locally and send that. PDFs/images go inline.
+  const prepared = await prepareForGemini({ filePath, mimeType, originalName });
+  const documentPart = prepared.mode === "text"
+    ? { text: `Extracted document content (plain text):\n\n${prepared.text}` }
+    : { inlineData: { mimeType, data: await fileToBase64(filePath) } };
+
   const { text, usedModel, usage } = await generateWithFallback(
     model,
     [
       { text: EXTRACTION_INSTRUCTION },
       { text: `Document filename: ${originalName}` },
-      { inlineData: { mimeType, data: base64 } },
+      documentPart,
     ],
     { temperature: 0.1, responseMimeType: "application/json" }
   );
