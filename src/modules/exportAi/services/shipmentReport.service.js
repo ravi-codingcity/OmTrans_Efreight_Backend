@@ -24,7 +24,11 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   // Shipper/Consignee/Notify, Container & Seal numbers, Freight term and Net Weight.
   const siDocs = documents.filter(isShippingInstruction);
   const sbDocs = documents.filter(isPriorityDoc);
-  const goodsDocs = sbDocs.length ? sbDocs : documents;
+  // Description of Goods (and its HSN codes) must ALWAYS come from the Shipping
+  // Bill / LEO / Indian Customs EDI — never from the Shipping Instruction. Prefer
+  // the Shipping Bill; otherwise any non-SI document; SI is always excluded here.
+  const nonSiDocs = documents.filter((d) => !isShippingInstruction(d));
+  const goodsDocs = sbDocs.length ? sbDocs : nonSiDocs;
   const bookingDocs = documents.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || ""));
   const firstVal = (docs, key) => {
     for (const d of docs) { const v = d.extractedFields && d.extractedFields[key]; if (!isEmpty(v)) return String(v); }
@@ -141,7 +145,11 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   });
 
   let goodsDescs = products.map((p) => p.description).filter((v) => !isEmpty(v));
-  if (!goodsDescs.length && !isEmpty(fields.description_of_goods)) goodsDescs = [String(fields.description_of_goods)];
+  if (!goodsDescs.length) {
+    // Fallback to the Shipping Bill / non-SI document field — not the SI document.
+    const fb = firstVal(goodsDocs, "description_of_goods");
+    if (!isEmpty(fb)) goodsDescs = [String(fb)];
+  }
   const uniqueHs = [...goodsHs.values()];
 
   const bookingSize = firstVal(bookingDocs, "container_size") || (bookingDocs.flatMap((d) => (d.rawExtraction && d.rawExtraction.containers) || []).find((c) => !isEmpty(c.size)) || {}).size || "";

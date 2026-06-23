@@ -36,7 +36,7 @@ Use SEMANTIC understanding, not exact keyword matching. Map equivalent terminolo
 abbreviations and alternate field names to the canonical keys. Examples (non-exhaustive):
 - "POD", "Discharge Port", "Port of Destination" -> port_of_discharge
 - "POL", "Loading Port" -> port_of_loading
-- "Shipper", "Exporter", "Seller", "From" -> exporter_name
+- "Shipper", "Exporter", "Seller", "From", "Exporter's Name & Address", "Exporter Name and Address" -> exporter_name (+ exporter_address)
 - "Consignee", "Buyer", "Bill To", "To" -> consignee_name
 - "Notify", "Notify Party", "Also Notify" -> notify_party
 - "Container No", "CONTAINER NUMBER", "CNTR", "Equipment No" -> container_number / containers[].containerNo
