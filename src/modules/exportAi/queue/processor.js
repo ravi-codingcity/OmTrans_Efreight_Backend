@@ -6,7 +6,7 @@ const { JOB_STATUS, DOC_STATUS } = require("../utils/constants");
 const { aiConfig } = require("../config/aiConfig");
 const { logger } = require("../config/logger");
 const { extractDocument, describeAiError, verifyGemini } = require("../services/gemini.service");
-const { reconcileDocuments } = require("../services/comparison.service");
+const { reconcileDocuments, isPriorityDoc, isShippingInstruction } = require("../services/comparison.service");
 const { buildShipmentReportData } = require("../services/shipmentReport.service");
 const { buildAnalysis } = require("../services/analysis.service");
 const { detectDocTypeFromName } = require("../utils/docType");
@@ -19,6 +19,41 @@ async function updateStatus(job, status, progress, message) {
   if (progress !== undefined) job.progress = progress;
   if (message) job.statusMessage = message;
   await job.save();
+}
+
+// Booking number is a shared detail — take it from the Booking Confirmation, then
+// E-Gate / Form 10, then any document.
+function bookingNumberOf(docs) {
+  const firstBooking = (list) => list.map((d) => d.extractedFields && d.extractedFields.booking_number).find((x) => x && String(x).trim());
+  const bookingDocs = docs.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || ""));
+  const egateDocs = docs.filter((d) => d.detectedType === "egate" || d.detectedType === "form_10" || /e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)|form[\s_-]*10/i.test(d.originalName || ""));
+  return firstBooking(bookingDocs) || firstBooking(egateDocs) || firstBooking(docs) || "";
+}
+
+// Clone the extracted metadata of a shipment's documents onto a new job (raw files
+// are already gone; only the extracted data is needed for later HBL/MBL/ISF builds).
+async function cloneDocsForJob(docs, jobId) {
+  const ids = [];
+  for (const d of docs) {
+    const raw = { ...(d.rawExtraction || {}) };
+    delete raw._tmpPath;
+    const copy = await Document.create({
+      job: jobId,
+      originalName: d.originalName,
+      mimeType: d.mimeType,
+      extension: d.extension,
+      sizeBytes: d.sizeBytes,
+      checksum: d.checksum,
+      status: d.status,
+      detectedType: d.detectedType,
+      confidence: d.confidence,
+      extractedFields: d.extractedFields || {},
+      rawExtraction: raw,
+      fileDeleted: true,
+    });
+    ids.push(copy._id);
+  }
+  return ids;
 }
 
 /** Full analysis pipeline for one job: analyse each doc → reconcile → build review data. */
@@ -118,21 +153,9 @@ async function processJob({ jobId, batchDir }) {
       const reason = Object.entries(errorCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "AI analysis failed for all documents";
       throw new Error(reason);
     }
-    const recon = reconcileDocuments(extracted);
 
-    job.consolidated = {
-      fields: recon.consolidated,
-      comparison: recon.comparison,
-      discrepancies: recon.discrepancies,
-      missingFields: recon.missingFields,
-      validationScore: recon.validationScore,
-    };
-    await updateStatus(job, JOB_STATUS.GENERATING, 88, "Building shipment report");
-
-    const fresh = await Job.findById(job._id);
-    fresh.consolidated = job.consolidated;
-    fresh.aiModelUsed = usedModel;
-    fresh.aiUsage = {
+    const location = job.location || "";
+    const fullUsage = {
       model: usedModel,
       analyses: aiTally.analyses,
       inputTokens: aiTally.inputTokens,
@@ -140,25 +163,112 @@ async function processJob({ jobId, batchDir }) {
       totalTokens: aiTally.totalTokens,
       costUsd: Number(estimateCost(usedModel, aiTally.inputTokens, aiTally.outputTokens).toFixed(6)),
     };
+    const zeroUsage = { model: usedModel, analyses: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 };
 
-    const location = fresh.location || "";
-    const srData = buildShipmentReportData(job.consolidated, extracted, { location });
-    fresh.analysis = { ...buildAnalysis(job.consolidated, extracted), weightCheck: srData.weightCheck || null };
+    // A shipment is built from one LEO/Shipping Bill + the shared documents.
+    const buildShipment = (docs, hblNumber, multiLeo = false) => {
+      const recon = reconcileDocuments(docs);
+      const consolidated = {
+        fields: recon.consolidated,
+        comparison: recon.comparison,
+        discrepancies: recon.discrepancies,
+        missingFields: recon.missingFields,
+        validationScore: recon.validationScore,
+      };
+      const srData = buildShipmentReportData(consolidated, docs, { location, multiLeo });
+      srData.hblNumber = hblNumber || "";
+      srData.bookingNumber = bookingNumberOf(docs) || "";
+      const analysis = { ...buildAnalysis(consolidated, docs), weightCheck: srData.weightCheck || null };
+      return { consolidated, srData, analysis };
+    };
 
-    const firstBooking = (list) => list.map((d) => d.extractedFields && d.extractedFields.booking_number).find((x) => x && String(x).trim());
-    const bookingDocs = extracted.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || ""));
-    const egateDocs = extracted.filter((d) => d.detectedType === "egate" || d.detectedType === "form_10" || /e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)|form[\s_-]*10/i.test(d.originalName || ""));
-    const bookingNumber = firstBooking(bookingDocs) || firstBooking(egateDocs) || firstBooking(extracted);
-    srData.hblNumber = fresh.hblNumber || "";
-    srData.bookingNumber = bookingNumber || "";
+    // LEO / Shipping Bill / INDIAN CUSTOMS EDI documents drive the shipments.
+    const leoDocs = extracted.filter(isPriorityDoc);
+    const isMulti = job.shipmentType === "multiple" && leoDocs.length >= 2;
 
-    fresh.shipmentReport = { data: srData, aiData: srData, generated: false };
-    fresh.status = JOB_STATUS.COMPLETED;
-    fresh.progress = 100;
-    fresh.statusMessage = "Completed — review & generate";
-    fresh.completedAt = new Date();
-    await fresh.save();
-    logger.info("Job completed", { jobId: String(job._id), score: recon.validationScore });
+    await updateStatus(job, JOB_STATUS.GENERATING, 88, isMulti ? `Building ${leoDocs.length} shipments` : "Building shipment report");
+
+    if (!isMulti) {
+      // ── Single-LEO workflow (unchanged) ──
+      const { consolidated, srData, analysis } = buildShipment(extracted, job.hblNumber);
+      const leo0 = leoDocs[0];
+      const fresh = await Job.findById(job._id);
+      fresh.consolidated = consolidated;
+      fresh.aiModelUsed = usedModel;
+      fresh.aiUsage = fullUsage;
+      fresh.analysis = analysis;
+      fresh.exporterName = (leo0 && leo0.extractedFields && leo0.extractedFields.exporter_name) || "";
+      fresh.shippingBillNumber = (leo0 && leo0.extractedFields && leo0.extractedFields.shipping_bill_number) || "";
+      fresh.shipmentReport = { data: srData, aiData: srData, generated: false };
+      fresh.status = JOB_STATUS.COMPLETED;
+      fresh.progress = 100;
+      fresh.statusMessage = "Completed — review & generate";
+      fresh.completedAt = new Date();
+      await fresh.save();
+      logger.info("Job completed", { jobId: String(job._id), score: consolidated.validationScore });
+    } else {
+      // ── Multiple-LEO workflow ──
+      // Shared docs (Booking, Forwarding Note, E-Gate, Invoice, Packing, …) apply to
+      // every shipment. The Shipping Instruction is excluded so each shipment's
+      // SHIPPER comes from its own LEO's EXPORTER'S NAME & ADDRESS.
+      const sharedDocs = extracted.filter((d) => !isPriorityDoc(d) && !isShippingInstruction(d));
+
+      for (let i = 0; i < leoDocs.length; i += 1) {
+        const leo = leoDocs[i];
+        const docsForShipment = [leo, ...sharedDocs];
+        const { consolidated, srData, analysis } = buildShipment(docsForShipment, "", true);
+        const exporterName = (leo.extractedFields && leo.extractedFields.exporter_name) || "";
+        const shippingBillNumber = (leo.extractedFields && leo.extractedFields.shipping_bill_number) || "";
+        const statusMessage = `Shipment ${i + 1} of ${leoDocs.length} — review & generate`;
+
+        if (i === 0) {
+          // Shipment 1 reuses the original (parent) job and carries the full AI usage.
+          const fresh = await Job.findById(job._id);
+          fresh.consolidated = consolidated;
+          fresh.aiModelUsed = usedModel;
+          fresh.aiUsage = fullUsage;
+          fresh.analysis = analysis;
+          fresh.exporterName = exporterName;
+          fresh.shippingBillNumber = shippingBillNumber;
+          fresh.shipmentIndex = 1;
+          fresh.shipmentReport = { data: srData, aiData: srData, generated: false };
+          fresh.status = JOB_STATUS.COMPLETED;
+          fresh.progress = 100;
+          fresh.statusMessage = statusMessage;
+          fresh.completedAt = new Date();
+          await fresh.save();
+        } else {
+          // Shipments 2..N are independent jobs linked by the same uploadSessionId.
+          const child = await Job.create({
+            owner: job.owner,
+            jobNumber: `${job.jobNumber} - S${i + 1}`,
+            hblNumber: "",
+            location,
+            aiModel: job.aiModel,
+            aiModelUsed: usedModel,
+            outputTemplate: job.outputTemplate,
+            uploadSessionId: job.uploadSessionId,
+            shipmentType: "multiple",
+            shipmentIndex: i + 1,
+            exporterName,
+            shippingBillNumber,
+            aiUsage: zeroUsage,
+            consolidated,
+            analysis,
+            shipmentReport: { data: srData, aiData: srData, generated: false },
+            status: JOB_STATUS.COMPLETED,
+            progress: 100,
+            statusMessage,
+            completedAt: new Date(),
+          });
+          // Each shipment job owns its own copies of its documents so MBL/ISF
+          // generation (which reads job.documents) works independently later.
+          child.documents = await cloneDocsForJob(docsForShipment, child._id);
+          await child.save();
+        }
+      }
+      logger.info("Multi-LEO job split", { session: job.uploadSessionId, shipments: leoDocs.length });
+    }
   } catch (err) {
     logger.error("Job processing failed", { jobId: String(jobId), error: err.message });
     job.status = JOB_STATUS.FAILED;

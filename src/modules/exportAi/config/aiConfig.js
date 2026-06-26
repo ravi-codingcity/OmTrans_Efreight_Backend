@@ -24,7 +24,7 @@ const aiConfig = {
   reportDir: process.env.AI_REPORT_DIR || path.resolve(process.cwd(), "storage/reports"),
 
   maxFileSizeMb: num("AI_MAX_FILE_SIZE_MB", 25),
-  maxFilesPerJob: num("AI_MAX_FILES_PER_JOB", 8),
+  maxFilesPerJob: num("AI_MAX_FILES_PER_JOB", 10),
   minFilesPerJob: num("AI_MIN_FILES_PER_JOB", 1),
 
   usdToInr: num("USD_TO_INR", 86),

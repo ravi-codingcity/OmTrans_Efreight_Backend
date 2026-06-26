@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { v4: uuid } = require("uuid");
 const { Job } = require("../models/Job");
 const { Document } = require("../models/Document");
 const { ApiError } = require("../utils/ApiError");
@@ -39,6 +40,7 @@ const createJob = asyncHandler(async (req, res) => {
   }
 
   const aiModel = resolveModel((req.body && req.body.model) || req.user.preferredAiModel);
+  const shipmentType = String((req.body && req.body.shipmentType) || "single").toLowerCase() === "multiple" ? "multiple" : "single";
 
   const job = await Job.create({
     owner: req.user._id,
@@ -47,6 +49,9 @@ const createJob = asyncHandler(async (req, res) => {
     location: req.user.location || "",
     aiModel,
     outputTemplate: resolveTemplate(req.body && req.body.outputTemplate),
+    uploadSessionId: uuid(),
+    shipmentType,
+    shipmentIndex: 1,
     status: JOB_STATUS.UPLOADING,
     progress: 5,
     statusMessage: "Uploaded — queued for analysis",

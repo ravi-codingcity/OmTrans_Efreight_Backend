@@ -13,6 +13,20 @@ const escapeXml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").repla
 const ROW_RE = /<w:tr[ >][\s\S]*?<\/w:tr>/g;
 const CELL_RE = /<w:tc>[\s\S]*?<\/w:tc>/g;
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function todayStr() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, "0")}-${MONTHS[d.getMonth()]}-${d.getFullYear()}`;
+}
+
+// Fill the "Date:" label at the top of the ISF (it lives in a header text box,
+// duplicated in a DrawingML run and a VML fallback — both are updated). Uses the
+// supplied date when present, otherwise today's date.
+function insertIsfDate(xml, dateStr) {
+  const run = `<w:r><w:rPr><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr><w:t xml:space="preserve"> ${escapeXml(dateStr)}</w:t></w:r>`;
+  return xml.replace(/(<w:t[^>]*>Date:<\/w:t><\/w:r>)/g, `$1${run}`);
+}
+
 function valuePara(value) {
   const lines = String(value == null ? "" : value).split("\n");
   const runs = lines.map((ln, i) => {
@@ -62,7 +76,9 @@ function isfValues(d = {}) {
 async function renderIsfBuffer(data) {
   const zip = await JSZip.loadAsync(fs.readFileSync(ISF_TEMPLATE_PATH));
   const docXml = await zip.file("word/document.xml").async("string");
-  zip.file("word/document.xml", fillIsfXml(docXml, isfValues(data)));
+  const dateStr = data && data.date && String(data.date).trim() ? String(data.date).trim() : todayStr();
+  const filled = insertIsfDate(fillIsfXml(docXml, isfValues(data)), dateStr);
+  zip.file("word/document.xml", filled);
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
 

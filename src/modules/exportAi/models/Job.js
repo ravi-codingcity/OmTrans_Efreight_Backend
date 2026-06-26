@@ -25,6 +25,15 @@ const jobSchema = new mongoose.Schema(
     hblNumber: { type: String, trim: true, index: true },
     location: { type: String, trim: true },
 
+    // Multiple-LEO support. A single upload of several LEO / Shipping Bills is split
+    // into one job per shipment, all sharing the same uploadSessionId. Single-LEO
+    // jobs get their own session of one shipment (fully backward compatible).
+    uploadSessionId: { type: String, index: true },
+    shipmentType: { type: String, enum: ["single", "multiple"], default: "single" },
+    shipmentIndex: { type: Number, default: 1 }, // 1-based position within the session
+    exporterName: { type: String, trim: true },
+    shippingBillNumber: { type: String, trim: true },
+
     aiModel: { type: String },
     aiModelUsed: { type: String },
 

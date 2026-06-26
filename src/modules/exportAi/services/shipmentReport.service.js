@@ -117,9 +117,11 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   const usedSeals = new Set();
   containers.forEach((c) => c.seals.forEach((s) => usedSeals.add(normKey(s))));
   // Pool any seals not already tied to a container — but NOT when the Shipping
-  // Instruction supplied the containers/seals (its values are authoritative, so we
-  // must not bleed unrelated seals from other documents onto its containers).
-  if (!siContainerNos.length) {
+  // Instruction supplied the containers/seals (its values are authoritative), and
+  // NOT in multiple-LEO mode (a shared Forwarding Note / E-Gate lists every
+  // shipment's seals, so unmatched ones belong to OTHER shipments — don't bleed
+  // them onto this shipment's container).
+  if (!siContainerNos.length && !options.multiLeo) {
     const orphanSeals = sealPool.filter((s) => !usedSeals.has(normKey(s)));
     if (orphanSeals.length) {
       if (containers.length) orphanSeals.forEach((s) => { containers[0].seals.push(s); usedSeals.add(normKey(s)); });
