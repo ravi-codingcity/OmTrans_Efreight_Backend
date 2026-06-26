@@ -232,62 +232,63 @@ async function processJob({ jobId, batchDir }) {
       // etc. They provide common data only and never create their own shipment.
       // (Shipment-specific data still comes from each LEO via `leoDoc`.)
       const sharedDocs = extracted.filter((d) => !isLeoDocument(d));
+      const buildFor = (leo) => buildShipment([leo, ...sharedDocs], "", { multiLeo: true, leoDoc: leo });
+      const leoMeta = (leo) => ({
+        exporterName: (leo.extractedFields && leo.extractedFields.exporter_name) || "",
+        shippingBillNumber: (leo.extractedFields && leo.extractedFields.shipping_bill_number) || "",
+      });
+      const N = leoDocs.length;
 
-      for (let i = 0; i < leoDocs.length; i += 1) {
+      // Create shipments 2..N FIRST, so they all exist before shipment 1 (the parent
+      // job) is marked completed — the Dashboard then shows the full session at once.
+      for (let i = 1; i < N; i += 1) {
         const leo = leoDocs[i];
-        const docsForShipment = [leo, ...sharedDocs];
-        const { consolidated, srData, analysis } = buildShipment(docsForShipment, "", { multiLeo: true, leoDoc: leo });
-        const exporterName = (leo.extractedFields && leo.extractedFields.exporter_name) || "";
-        const shippingBillNumber = (leo.extractedFields && leo.extractedFields.shipping_bill_number) || "";
-        const statusMessage = `Shipment ${i + 1} of ${leoDocs.length} — review & generate`;
-
-        if (i === 0) {
-          // Shipment 1 reuses the original (parent) job and carries the full AI usage.
-          const fresh = await Job.findById(job._id);
-          fresh.consolidated = consolidated;
-          fresh.aiModelUsed = usedModel;
-          fresh.aiUsage = fullUsage;
-          fresh.analysis = analysis;
-          fresh.exporterName = exporterName;
-          fresh.shippingBillNumber = shippingBillNumber;
-          fresh.shipmentIndex = 1;
-          fresh.shipmentReport = { data: srData, aiData: srData, generated: false };
-          fresh.status = JOB_STATUS.COMPLETED;
-          fresh.progress = 100;
-          fresh.statusMessage = statusMessage;
-          fresh.completedAt = new Date();
-          await fresh.save();
-        } else {
-          // Shipments 2..N are independent jobs linked by the same uploadSessionId.
-          const child = await Job.create({
-            owner: job.owner,
-            jobNumber: `${job.jobNumber} - S${i + 1}`,
-            hblNumber: "",
-            location,
-            aiModel: job.aiModel,
-            aiModelUsed: usedModel,
-            outputTemplate: job.outputTemplate,
-            uploadSessionId: job.uploadSessionId,
-            shipmentType: "multiple",
-            shipmentIndex: i + 1,
-            exporterName,
-            shippingBillNumber,
-            aiUsage: zeroUsage,
-            consolidated,
-            analysis,
-            shipmentReport: { data: srData, aiData: srData, generated: false },
-            status: JOB_STATUS.COMPLETED,
-            progress: 100,
-            statusMessage,
-            completedAt: new Date(),
-          });
-          // Each shipment job owns its own copies of its documents so MBL/ISF
-          // generation (which reads job.documents) works independently later.
-          child.documents = await cloneDocsForJob(docsForShipment, child._id);
-          await child.save();
-        }
+        const { consolidated, srData, analysis } = buildFor(leo);
+        const child = await Job.create({
+          owner: job.owner,
+          jobNumber: `${job.jobNumber} - S${i + 1}`,
+          hblNumber: "",
+          location,
+          aiModel: job.aiModel,
+          aiModelUsed: usedModel,
+          outputTemplate: job.outputTemplate,
+          uploadSessionId: job.uploadSessionId,
+          shipmentType: "multiple",
+          shipmentIndex: i + 1,
+          ...leoMeta(leo),
+          aiUsage: zeroUsage,
+          consolidated,
+          analysis,
+          shipmentReport: { data: srData, aiData: srData, generated: false },
+          status: JOB_STATUS.COMPLETED,
+          progress: 100,
+          statusMessage: `Shipment ${i + 1} of ${N} — review & generate`,
+          completedAt: new Date(),
+        });
+        // Each shipment job owns its own copies of its documents so MBL/ISF
+        // generation (which reads job.documents) works independently later.
+        child.documents = await cloneDocsForJob([leo, ...sharedDocs], child._id);
+        await child.save();
       }
-      logger.info("Multi-LEO job split", { session: job.uploadSessionId, shipments: leoDocs.length });
+
+      // Shipment 1 reuses the original (parent) job, carries the full AI usage, and is
+      // saved LAST so completing it signals the whole session is ready.
+      const leo0 = leoDocs[0];
+      const first = buildFor(leo0);
+      const fresh = await Job.findById(job._id);
+      fresh.consolidated = first.consolidated;
+      fresh.aiModelUsed = usedModel;
+      fresh.aiUsage = fullUsage;
+      fresh.analysis = first.analysis;
+      fresh.shipmentIndex = 1;
+      Object.assign(fresh, leoMeta(leo0));
+      fresh.shipmentReport = { data: first.srData, aiData: first.srData, generated: false };
+      fresh.status = JOB_STATUS.COMPLETED;
+      fresh.progress = 100;
+      fresh.statusMessage = `Shipment 1 of ${N} — review & generate`;
+      fresh.completedAt = new Date();
+      await fresh.save();
+      logger.info("Multi-LEO job split", { session: job.uploadSessionId, shipments: N });
     }
   } catch (err) {
     logger.error("Job processing failed", { jobId: String(jobId), error: err.message });

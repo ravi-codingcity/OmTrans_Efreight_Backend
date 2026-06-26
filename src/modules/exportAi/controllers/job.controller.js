@@ -97,12 +97,16 @@ const listJobs = asyncHandler(async (req, res) => {
   if (reportType) filter.outputTemplate = reportType;
   if (jobNumber) filter.jobNumber = new RegExp(esc(jobNumber), "i");
   if (hblNumber) filter.hblNumber = new RegExp(esc(hblNumber), "i");
-  if (q) filter.$or = [{ jobNumber: new RegExp(esc(q), "i") }, { hblNumber: new RegExp(esc(q), "i") }];
   if (dateFrom || dateTo) {
     filter.createdAt = {};
     if (dateFrom) filter.createdAt.$gte = new Date(dateFrom);
     if (dateTo) { const end = new Date(dateTo); end.setHours(23, 59, 59, 999); filter.createdAt.$lte = end; }
   }
+  // A Multiple-LEO upload session is ONE dashboard entry: only its parent (shipment 1)
+  // appears in the paginated list; the remaining shipments are nested under it.
+  const andClauses = [{ $or: [{ shipmentType: { $ne: "multiple" } }, { shipmentIndex: 1 }] }];
+  if (q) andClauses.push({ $or: [{ jobNumber: new RegExp(esc(q), "i") }, { hblNumber: new RegExp(esc(q), "i") }] });
+  filter.$and = andClauses;
 
   const [items, total] = await Promise.all([
     Job.find(filter)
@@ -111,9 +115,31 @@ const listJobs = asyncHandler(async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit)
       .populate("owner", "fullName username")
-      .select("-consolidated.comparison -analysis -shipmentReport.data -shipmentReport.aiData -mbl.data -isf.data"),
+      .select("-consolidated.comparison -analysis -shipmentReport.data -shipmentReport.aiData -mbl.data -isf.data")
+      .lean(),
     Job.countDocuments(filter),
   ]);
+
+  // Attach each Multiple-LEO session's shipments (lightweight) to its parent so the
+  // Dashboard can expand the group without an extra request.
+  const sessionIds = items
+    .filter((j) => j.shipmentType === "multiple" && j.uploadSessionId)
+    .map((j) => j.uploadSessionId);
+  if (sessionIds.length) {
+    const members = await Job.find({ uploadSessionId: { $in: sessionIds } })
+      .sort({ shipmentIndex: 1 })
+      .populate("owner", "fullName username")
+      .select("uploadSessionId shipmentIndex shipmentType jobNumber hblNumber exporterName shippingBillNumber status progress createdAt documents shipmentReport.generated")
+      .lean();
+    const bySession = {};
+    members.forEach((m) => { (bySession[m.uploadSessionId] = bySession[m.uploadSessionId] || []).push(m); });
+    items.forEach((j) => {
+      if (j.shipmentType === "multiple" && j.uploadSessionId) {
+        j.sessionShipments = bySession[j.uploadSessionId] || [];
+        j.sessionCount = j.sessionShipments.length || 1;
+      }
+    });
+  }
 
   res.json({ success: true, data: items, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
 });
