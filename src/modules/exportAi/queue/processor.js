@@ -208,10 +208,12 @@ async function processJob({ jobId, batchDir }) {
       logger.info("Job completed", { jobId: String(job._id), score: consolidated.validationScore });
     } else {
       // ── Multiple-LEO workflow ──
-      // Shared docs (Booking, Forwarding Note, E-Gate, Invoice, Packing, …) apply to
-      // every shipment. The Shipping Instruction is excluded so each shipment's
-      // SHIPPER comes from its own LEO's EXPORTER'S NAME & ADDRESS.
-      const sharedDocs = extracted.filter((d) => !isPriorityDoc(d) && !isShippingInstruction(d));
+      // Every non-LEO document is shared across all shipments — Booking Confirmation,
+      // Shipping Instruction, Invoice, Packing List, Forwarding Note / E-Gate / CLP,
+      // etc. Only the LEO / Shipping Bill data varies per shipment. (In multiLeo mode
+      // the per-shipment shipper, consignee and containers still come from each LEO —
+      // see buildShipmentReportData — so a shared SI never overrides them.)
+      const sharedDocs = extracted.filter((d) => !isPriorityDoc(d));
 
       for (let i = 0; i < leoDocs.length; i += 1) {
         const leo = leoDocs[i];

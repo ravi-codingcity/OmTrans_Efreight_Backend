@@ -26,6 +26,7 @@ const DOC_TYPES = Object.freeze([
   "forwarding_note",
   "form_10",
   "egate",
+  "clp", // Container Load Plan — carries Agent Seal No. + Custom Seal No.
   "purchase_order",
   "insurance_certificate",
   "unknown",
@@ -53,6 +54,8 @@ const CANONICAL_FIELDS = Object.freeze([
   "vessel_etd", "vessel_eta",
   // Shipping Instruction specific
   "freight", "liner_seal_number", "customs_seal_number",
+  // CLP (Container Load Plan)
+  "agent_seal_number",
 ]);
 
 const OUTPUT_TEMPLATES = Object.freeze({

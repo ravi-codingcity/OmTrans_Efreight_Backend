@@ -42,6 +42,7 @@ abbreviations and alternate field names to the canonical keys. Examples (non-exh
 - "Container No", "CONTAINER NUMBER", "CNTR", "Equipment No" -> container_number / containers[].containerNo
 - "Seal No", "Carrier Seal" -> seal_number / containers[].sealNo / seals[]
 - "Liner Seal No.", "Line Seal No.", "Shipping Line Seal" -> liner_seal_number / containers[].linerSeal / seals[]
+- "Agent Seal No." (e.g. on a CLP / Container Load Plan) -> agent_seal_number / containers[].agentSeal / seals[]
 - "Customs Seal No.", "Custom Seal No.", "Cust Seal No." -> customs_seal_number / containers[].customsSeal / seals[]
 - "Freight", "PREPAID", "COLLECT", "FREIGHT PREPAID", "FREIGHT COLLECT", "Freight Terms" -> freight (keep the ORIGINAL wording verbatim)
 - "GW", "Gross Wt" -> total_gross_weight ; "NW", "Net Wt", "Net Weight" -> total_net_weight
@@ -61,7 +62,8 @@ DOCUMENT TYPE:
 - "Booking Confirmation", "Booking Note" -> detectedType="booking_confirmation".
 - "Forwarding Note" -> detectedType="forwarding_note".
 - "Form 10", "FORM 10" -> detectedType="form_10".
-- "Form 13", "Form 6", "SEZ 4 E-Gatepass", "E-GATE FORM" -> detectedType="egate".
+- "Form 13", "Form 6", "SEZ 4 E-Gatepass", "E-GATE FORM" -> detectedType="egate" (extract Line Seal No. + Custom Seal No.).
+- "CLP", "Container Load Plan" -> detectedType="clp" (extract Agent Seal No. + Custom Seal No.).
 
 SHIPPING INSTRUCTION: this is the authoritative source for Shipper/Consignee/Notify Party
 addresses, Container No. / Liner Seal No. / Customs Seal No., the FREIGHT term (e.g. "FREIGHT
@@ -72,8 +74,11 @@ notify_party_address — never truncate. For notify party, put the full company 
 and the rest in notify_party_address; if "SAME AS CONSIGNEE", copy the consignee's full name + address.
 
 FORWARDING NOTE: extract EVERY seal number into "seals" (do not merge).
-FORM 10 / E-GATE: extract EVERY "Line Seal No." AND "Custom Seal No." into "seals" and set
-containers[].sealNo when shown per row; also extract the printed "Booking No." into booking_number.
+FORM 10 / E-GATE / FORM 13: extract EVERY "Line Seal No." AND "Custom Seal No." into "seals"
+and set containers[].linerSeal / containers[].customsSeal (or containers[].sealNo) per row; also
+extract the printed "Booking No." into booking_number.
+CLP (Container Load Plan): extract "Agent Seal No." into containers[].agentSeal and "Custom Seal
+No." into containers[].customsSeal (and into "seals"), keyed to each container row.
 
 Return ONLY a JSON object with this exact shape:
 {
@@ -84,7 +89,7 @@ Return ONLY a JSON object with this exact shape:
   },
   "hsCodes": [ string ],
   "seals": [ string ],
-  "containers": [ { "containerNo": string, "sealNo": string, "linerSeal": string, "customsSeal": string, "size": string, "marks": string, "packages": string, "weight": string } ],
+  "containers": [ { "containerNo": string, "sealNo": string, "linerSeal": string, "agentSeal": string, "customsSeal": string, "size": string, "marks": string, "packages": string, "weight": string } ],
   "lineItems": [ { "description": string, "quantity": string, "unitPrice": string, "amount": string, "hsCode": string } ],
   "notes": string
 }
@@ -181,7 +186,7 @@ async function extractDocument({ filePath, mimeType, originalName, model }) {
     fields: parsed.fields || {},
     hsCodes: Array.isArray(parsed.hsCodes) ? parsed.hsCodes.filter(Boolean).map(String) : [],
     seals: Array.isArray(parsed.seals) ? parsed.seals.filter(Boolean).map(String) : [],
-    containers: Array.isArray(parsed.containers) ? parsed.containers.filter((c) => c && (c.containerNo || c.sealNo || c.linerSeal || c.customsSeal)) : [],
+    containers: Array.isArray(parsed.containers) ? parsed.containers.filter((c) => c && (c.containerNo || c.sealNo || c.linerSeal || c.agentSeal || c.customsSeal)) : [],
     lineItems: Array.isArray(parsed.lineItems) ? parsed.lineItems : [],
     notes: parsed.notes || "",
     usedModel,

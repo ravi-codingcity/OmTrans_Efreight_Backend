@@ -11,6 +11,7 @@ function detectDocTypeFromName(name = "") {
   if (/forwarding/.test(s)) return "forwarding_note";
   if (/form[\s_-]*10|form10/.test(s)) return "form_10";
   if (/e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)/.test(s)) return "egate";
+  if (/\bclp\b|container\s*load\s*plan/.test(s)) return "clp";
   if (/packing/.test(s)) return "packing_list";
   if (/invoice|\binv\b/.test(s)) return "commercial_invoice";
   if (/bill\s*of\s*lading|\bb[\s/-]?l\b|\bbol\b|waybill/.test(s)) return "bill_of_lading";

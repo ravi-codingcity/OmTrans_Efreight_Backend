@@ -13,7 +13,7 @@ const normKey = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 const cleanSeal = (s) =>
   String(s || "")
-    .replace(/^\s*(line\s*seal\s*no\.?|shipping\s*line\s*seal\s*no\.?|carrier\s*seal\s*no\.?|customs?\s*seal\s*no\.?|cust\s*seal\s*no\.?|line\s*seal|shipping\s*line\s*seal|carrier\s*seal|customs?\s*seal|seal\s*no\.?|c\s*\/\s*s|seal)\s*[:.#-]*\s*/i, "")
+    .replace(/^\s*(line\s*seal\s*no\.?|shipping\s*line\s*seal\s*no\.?|carrier\s*seal\s*no\.?|agent\s*seal\s*no\.?|customs?\s*seal\s*no\.?|cust\s*seal\s*no\.?|line\s*seal|shipping\s*line\s*seal|carrier\s*seal|agent\s*seal|customs?\s*seal|seal\s*no\.?|c\s*\/\s*s|seal)\s*[:.#-]*\s*/i, "")
     .trim();
 
 function buildShipmentReportData(consolidated = {}, documents = [], options = {}) {
@@ -40,16 +40,20 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     d.detectedType === "form_10" || d.detectedType === "egate" ||
     /form[\s_-]*10|form10|e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)/i.test(d.originalName || "")
   );
+  // CLP (Container Load Plan) — carries Agent Seal No. + Custom Seal No.
+  const clpDocs = documents.filter((d) => d.detectedType === "clp" || /\bclp\b|container\s*load\s*plan/i.test(d.originalName || ""));
 
   const isMumbai = String(options.location || "").trim().toLowerCase() === "mumbai";
-  const extraSealDocs = isMumbai ? egateDocs : fwdDocs;
   const sealRule = isMumbai ? "Mumbai" : "Delhi";
-  // Seal-source priority (per location):
-  //   Delhi : Shipping Instruction → LEO/Shipping Bill/EDI → Forwarding Note
-  //   Mumbai: Shipping Instruction → LEO/Shipping Bill/EDI → E-Gate (Form 13/6/SEZ 4)
+  // Seal numbers are taken from whichever seal document the user uploaded — any of
+  // Forwarding Note, Form 13 / E-Gate, or CLP. The location only sets which is
+  // preferred first; all are accepted (auto-detected) and de-duplicated.
+  //   Delhi : Shipping Instruction → LEO/Shipping Bill/EDI → Forwarding Note → E-Gate/Form 13 → CLP
+  //   Mumbai: Shipping Instruction → LEO/Shipping Bill/EDI → E-Gate/Form 13 → Forwarding Note → CLP
+  const extraSealDocs = isMumbai ? [...egateDocs, ...fwdDocs, ...clpDocs] : [...fwdDocs, ...egateDocs, ...clpDocs];
   const sealDocs = [...siDocs, ...sbDocs, ...extraSealDocs];
 
-  const docRank = (d) => (isShippingInstruction(d) ? 0 : isPriorityDoc(d) ? 1 : fwdDocs.includes(d) ? 2 : 3);
+  const docRank = (d) => (isShippingInstruction(d) ? 0 : isPriorityDoc(d) ? 1 : (fwdDocs.includes(d) || egateDocs.includes(d) || clpDocs.includes(d)) ? 2 : 3);
   const orderedDocs = [...documents].sort((a, b) => docRank(a) - docRank(b));
   const pushUnique = (arr, v) => { if (!isEmpty(v) && !arr.some((x) => normKey(x) === normKey(v))) arr.push(String(v).trim()); };
 
@@ -63,7 +67,9 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   };
   const siContainerNos = containersFromDocs(siDocs);
   const sbContainerNos = containersFromDocs(sbDocs);
-  let containerNos = siContainerNos.length ? siContainerNos : sbContainerNos;
+  // In Multiple-LEO mode, container numbers are shipment-specific and must come from
+  // THIS shipment's LEO — never from the shared Shipping Instruction.
+  let containerNos = (!options.multiLeo && siContainerNos.length) ? siContainerNos : sbContainerNos;
   if (!containerNos.length) {
     containerNos = [];
     orderedDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(containerNos, c.containerNo)));
@@ -79,10 +85,12 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     const arr = sealsByContainer.get(k);
     if (!arr.some((s) => normKey(s) === normKey(v))) arr.push(v);
   };
-  // Liner Seal No. and Customs Seal No. are both captured (SI provides them per row).
+  // Liner / Agent / Customs Seal No. are all captured per container row (Forwarding
+  // Note, Form 13, CLP and SI each provide whichever variants apply).
   sealDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
     addSealTo(c.containerNo, c.sealNo);
     addSealTo(c.containerNo, c.linerSeal);
+    addSealTo(c.containerNo, c.agentSeal);
     addSealTo(c.containerNo, c.customsSeal);
   }));
 
@@ -100,11 +108,13 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
       pushUnique(sealPool, cleanSeal(c.sealNo));
       pushUnique(sealPool, cleanSeal(c.linerSeal));
+      pushUnique(sealPool, cleanSeal(c.agentSeal));
       pushUnique(sealPool, cleanSeal(c.customsSeal));
     });
     ((d.rawExtraction && d.rawExtraction.seals) || []).forEach((s) => pushUnique(sealPool, cleanSeal(s)));
     pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.seal_number));
     pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.liner_seal_number));
+    pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.agent_seal_number));
     pushUnique(sealPool, cleanSeal(d.extractedFields && d.extractedFields.customs_seal_number));
   });
 
@@ -278,21 +288,25 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
 
   // Shipping Instruction priority for Shipper / Consignee / Notify Party: when the SI
   // provides these, they win; otherwise the values above (LEO / Shipping Bill / EDI)
-  // are kept as the fallback.
-  const siAddress = (nameKey, addrKey) => {
-    let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
-    parts = parts.filter((p, i) => !parts.some((o, j) => j !== i && o.toLowerCase().includes(p.toLowerCase())));
-    return parts.join("\n");
-  };
-  const siOverrides = {
-    "Shipper / Exporter": siAddress("exporter_name", "exporter_address"),
-    Consignee: siAddress("consignee_name", "consignee_address"),
-    "Notify Party": siAddress("notify_party", "notify_party_address"),
-  };
-  summary.forEach((s) => {
-    const ov = siOverrides[s.label];
-    if (!isEmpty(ov)) { s.value = ov; s.found = true; s.blank = false; }
-  });
+  // are kept as the fallback. In Multiple-LEO mode this override is skipped — each
+  // shipment's parties must come from its own LEO (a shared SI cannot dictate the
+  // shipper/consignee for every different exporter).
+  if (!options.multiLeo) {
+    const siAddress = (nameKey, addrKey) => {
+      let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
+      parts = parts.filter((p, i) => !parts.some((o, j) => j !== i && o.toLowerCase().includes(p.toLowerCase())));
+      return parts.join("\n");
+    };
+    const siOverrides = {
+      "Shipper / Exporter": siAddress("exporter_name", "exporter_address"),
+      Consignee: siAddress("consignee_name", "consignee_address"),
+      "Notify Party": siAddress("notify_party", "notify_party_address"),
+    };
+    summary.forEach((s) => {
+      const ov = siOverrides[s.label];
+      if (!isEmpty(ov)) { s.value = ov; s.found = true; s.blank = false; }
+    });
+  }
 
   const vesselEtd = firstVal(bookingDocs, "vessel_etd");
   const vesselEta = firstVal(bookingDocs, "vessel_eta");
