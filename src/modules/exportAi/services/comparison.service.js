@@ -22,6 +22,17 @@ function isPriorityDoc(doc) {
 }
 
 /**
+ * STRICT LEO/Shipping-Bill identity — used to COUNT shipments in the Multiple-LEO
+ * workflow. Unlike isPriorityDoc (which also matches any document that merely
+ * mentions a shipping bill in its name/notes — e.g. an Invoice or Shipping
+ * Instruction quoting the SB number), this relies only on the document
+ * classification, so shared documents never inflate the shipment count.
+ */
+function isLeoDocument(doc) {
+  return Boolean(doc && doc.detectedType === "shipping_bill");
+}
+
+/**
  * Shipping Instruction / Bill of Lading Instructions — the high-priority source for
  * Shipper/Consignee/Notify addresses, Container & Seal numbers, Freight term and Net
  * Weight. (It does NOT override every field; see shipmentReport.service.js.)
@@ -85,4 +96,4 @@ function reconcileDocuments(documents) {
   return { consolidated, comparison, discrepancies, missingFields, validationScore };
 }
 
-module.exports = { isPriorityDoc, isShippingInstruction, reconcileDocuments };
+module.exports = { isPriorityDoc, isLeoDocument, isShippingInstruction, reconcileDocuments };

@@ -6,7 +6,7 @@ const { JOB_STATUS, DOC_STATUS } = require("../utils/constants");
 const { aiConfig } = require("../config/aiConfig");
 const { logger } = require("../config/logger");
 const { extractDocument, describeAiError, verifyGemini } = require("../services/gemini.service");
-const { reconcileDocuments, isPriorityDoc, isShippingInstruction } = require("../services/comparison.service");
+const { reconcileDocuments, isLeoDocument } = require("../services/comparison.service");
 const { buildShipmentReportData } = require("../services/shipmentReport.service");
 const { buildAnalysis } = require("../services/analysis.service");
 const { detectDocTypeFromName } = require("../utils/docType");
@@ -28,6 +28,20 @@ function bookingNumberOf(docs) {
   const bookingDocs = docs.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || ""));
   const egateDocs = docs.filter((d) => d.detectedType === "egate" || d.detectedType === "form_10" || /e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)|form[\s_-]*10/i.test(d.originalName || ""));
   return firstBooking(bookingDocs) || firstBooking(egateDocs) || firstBooking(docs) || "";
+}
+
+// One shipment per unique LEO. Collapse duplicate LEO scans that share the same
+// Shipping Bill number (LEOs without an SB number remain distinct — one per file).
+function dedupeLeoDocuments(leos) {
+  const seen = new Set();
+  const out = [];
+  for (const d of leos) {
+    const sb = String((d.extractedFields && d.extractedFields.shipping_bill_number) || "").replace(/\s+/g, "").toLowerCase();
+    if (sb && seen.has(sb)) continue;
+    if (sb) seen.add(sb);
+    out.push(d);
+  }
+  return out;
 }
 
 // Clone the extracted metadata of a shipment's documents onto a new job (raw files
@@ -165,8 +179,10 @@ async function processJob({ jobId, batchDir }) {
     };
     const zeroUsage = { model: usedModel, analyses: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 };
 
-    // A shipment is built from one LEO/Shipping Bill + the shared documents.
-    const buildShipment = (docs, hblNumber, multiLeo = false) => {
+    // A shipment is built from one LEO/Shipping Bill + the shared documents. In
+    // multiLeo mode `leoDoc` scopes all shipment-specific data (exporter, goods,
+    // SB number/date, gross weight, quantity) to exactly that LEO.
+    const buildShipment = (docs, hblNumber, { multiLeo = false, leoDoc = null } = {}) => {
       const recon = reconcileDocuments(docs);
       const consolidated = {
         fields: recon.consolidated,
@@ -175,15 +191,18 @@ async function processJob({ jobId, batchDir }) {
         missingFields: recon.missingFields,
         validationScore: recon.validationScore,
       };
-      const srData = buildShipmentReportData(consolidated, docs, { location, multiLeo });
+      const srData = buildShipmentReportData(consolidated, docs, { location, multiLeo, leoDoc });
       srData.hblNumber = hblNumber || "";
       srData.bookingNumber = bookingNumberOf(docs) || "";
       const analysis = { ...buildAnalysis(consolidated, docs), weightCheck: srData.weightCheck || null };
       return { consolidated, srData, analysis };
     };
 
-    // LEO / Shipping Bill / INDIAN CUSTOMS EDI documents drive the shipments.
-    const leoDocs = extracted.filter(isPriorityDoc);
+    // ONE shipment per uploaded LEO / Shipping Bill / INDIAN CUSTOMS EDI document.
+    // Use the strict classification (not the loose isPriorityDoc) so shared docs
+    // that merely reference an SB number never create extra shipments, and dedupe
+    // by Shipping Bill number so the same LEO scanned twice counts once.
+    const leoDocs = dedupeLeoDocuments(extracted.filter(isLeoDocument));
     const isMulti = job.shipmentType === "multiple" && leoDocs.length >= 2;
 
     await updateStatus(job, JOB_STATUS.GENERATING, 88, isMulti ? `Building ${leoDocs.length} shipments` : "Building shipment report");
@@ -210,15 +229,14 @@ async function processJob({ jobId, batchDir }) {
       // ── Multiple-LEO workflow ──
       // Every non-LEO document is shared across all shipments — Booking Confirmation,
       // Shipping Instruction, Invoice, Packing List, Forwarding Note / E-Gate / CLP,
-      // etc. Only the LEO / Shipping Bill data varies per shipment. (In multiLeo mode
-      // the per-shipment shipper, consignee and containers still come from each LEO —
-      // see buildShipmentReportData — so a shared SI never overrides them.)
-      const sharedDocs = extracted.filter((d) => !isPriorityDoc(d));
+      // etc. They provide common data only and never create their own shipment.
+      // (Shipment-specific data still comes from each LEO via `leoDoc`.)
+      const sharedDocs = extracted.filter((d) => !isLeoDocument(d));
 
       for (let i = 0; i < leoDocs.length; i += 1) {
         const leo = leoDocs[i];
         const docsForShipment = [leo, ...sharedDocs];
-        const { consolidated, srData, analysis } = buildShipment(docsForShipment, "", true);
+        const { consolidated, srData, analysis } = buildShipment(docsForShipment, "", { multiLeo: true, leoDoc: leo });
         const exporterName = (leo.extractedFields && leo.extractedFields.exporter_name) || "";
         const shippingBillNumber = (leo.extractedFields && leo.extractedFields.shipping_bill_number) || "";
         const statusMessage = `Shipment ${i + 1} of ${leoDocs.length} — review & generate`;

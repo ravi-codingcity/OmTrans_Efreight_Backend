@@ -23,7 +23,11 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   // Shipping Instruction / Bill of Lading Instructions — highest-priority source for
   // Shipper/Consignee/Notify, Container & Seal numbers, Freight term and Net Weight.
   const siDocs = documents.filter(isShippingInstruction);
-  const sbDocs = documents.filter(isPriorityDoc);
+  // In Multiple-LEO mode the caller pins THIS shipment's LEO so all shipment-specific
+  // data (exporter, goods, SB number/date, gross weight, quantity, container) comes
+  // only from that document — never from another shipment's LEO or a shared doc that
+  // happens to reference a shipping bill.
+  const sbDocs = options.leoDoc ? [options.leoDoc] : documents.filter(isPriorityDoc);
   // Description of Goods (and its HSN codes) must ALWAYS come from the Shipping
   // Bill / LEO / Indian Customs EDI — never from the Shipping Instruction. Prefer
   // the Shipping Bill; otherwise any non-SI document; SI is always excluded here.
