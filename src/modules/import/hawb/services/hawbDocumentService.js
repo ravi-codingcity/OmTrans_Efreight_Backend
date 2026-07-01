@@ -35,6 +35,9 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
   shipper: str(body.shipper),
   consignee: str(body.consignee),
   notify: str(body.notify),
+  notify_party_2: str(body.notify_party_2),
+
+  accounting_information: str(body.accounting_information),
 
   routing_airport_of_departure: str(body.routing_airport_of_departure),
   routing_to: str(body.routing_to),

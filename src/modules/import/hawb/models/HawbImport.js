@@ -18,7 +18,11 @@ const hawbImportSchema = new mongoose.Schema(
     // Parties
     shipper: { type: String, default: "", trim: true },
     consignee: { type: String, default: "", trim: true },
-    notify: { type: String, default: "", trim: true },
+    notify: { type: String, default: "", trim: true }, // Notify Party 1
+    notify_party_2: { type: String, default: "", trim: true }, // optional
+
+    // Accounting Information (optional free text — maps to the template's box)
+    accounting_information: { type: String, default: "", trim: true },
 
     // Routing Information
     routing_airport_of_departure: { type: String, default: "", trim: true },

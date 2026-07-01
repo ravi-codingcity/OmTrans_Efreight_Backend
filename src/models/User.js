@@ -45,13 +45,20 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving
+// Hash password before saving.
+// IMPORTANT: only (re)hash when the password was actually set/changed. Without the
+// early `return`, every save that does NOT touch the password (e.g. profile or
+// preference updates) would re-hash the already-hashed value and permanently break
+// login — that was the root cause of the "Invalid username or password" failures.
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    next();
+  if (!this.isModified('password')) return next();
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    return next();
+  } catch (err) {
+    return next(err);
   }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
 });
 
 // Method to compare password
