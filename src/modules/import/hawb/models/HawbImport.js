@@ -24,6 +24,9 @@ const hawbImportSchema = new mongoose.Schema(
     // Accounting Information (optional free text — maps to the template's box)
     accounting_information: { type: String, default: "", trim: true },
 
+    // Destination Agent Detail (optional free text — maps to the template's cell)
+    destination_agent_detail: { type: String, default: "", trim: true },
+
     // Routing Information
     routing_airport_of_departure: { type: String, default: "", trim: true },
     routing_to: { type: String, default: "", trim: true },
