@@ -41,6 +41,8 @@ const startServer = async () => {
     app.use('/api/import/mawb', require('./modules/import/routes/mawbRoutes'));
     // Import module (isolated) — HAWB (House Air Waybill) documents
     app.use('/api/import/hawb', require('./modules/import/hawb/routes/hawbRoutes'));
+    // Import module (isolated) — AI Document Verification (CHA Checklist vs. system PDFs)
+    app.use('/api/import/verification', require('./modules/import/verification/routes/verificationRoutes'));
 
     // Export-AI module (isolated) — Gemini document analysis + jobs.
     // Reuses the existing Mongo connection, User model and JWT auth.
