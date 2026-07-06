@@ -19,8 +19,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Body parser
-app.use(express.json());
+// Body parser. The limit is raised so document-verification requests (PDFs sent as
+// base64 JSON, like the other Import endpoints) are accepted; small JSON bodies used
+// by every other route are unaffected.
+app.use(express.json({ limit: '60mb' }));
 
 // Start server after DB connection
 const startServer = async () => {

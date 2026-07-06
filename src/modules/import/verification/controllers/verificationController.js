@@ -1,4 +1,4 @@
-const { validateVerificationUpload } = require("../validation/verificationValidation");
+const { validateVerificationPayload } = require("../validation/verificationValidation");
 const { compareChecklist, describeAiError } = require("../services/geminiCompareService");
 
 /* ------------------------------------------------------------------ */
@@ -9,7 +9,7 @@ const { compareChecklist, describeAiError } = require("../services/geminiCompare
 const compareDocuments = async (req, res) => {
   const started = Date.now();
   try {
-    const { valid, errors, checklist, systemDocs } = validateVerificationUpload(req.files);
+    const { valid, errors, checklist, systemDocs } = validateVerificationPayload(req.body);
     if (!valid) {
       return res.status(400).json({ success: false, message: errors[0], errors });
     }

@@ -1,7 +1,5 @@
 const express = require("express");
-const multer = require("multer");
 const { authenticate, importAccess } = require("../../middleware/importAuth");
-const { uploadVerificationDocs } = require("../middleware/upload");
 const { geminiConfig } = require("../config/geminiConfig");
 const { compareDocuments, getStatus } = require("../controllers/verificationController");
 
@@ -21,25 +19,9 @@ const allowLongRequest = (req, res, next) => {
   next();
 };
 
-// Wrap multer so its errors (file too large / too many / wrong type) become
-// clean JSON responses instead of unhandled exceptions.
-router.post(
-  "/compare",
-  allowLongRequest,
-  (req, res, next) =>
-    uploadVerificationDocs(req, res, (err) => {
-      if (!err) return next();
-      const message =
-        err instanceof multer.MulterError
-          ? (err.code === "LIMIT_FILE_SIZE"
-              ? "A file exceeds the maximum allowed size."
-              : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE"
-              ? "Too many files uploaded."
-              : err.message)
-          : err.message || "File upload failed";
-      return res.status(400).json({ success: false, message });
-    }),
-  compareDocuments
-);
+// PDFs arrive as base64 inside a JSON body (identical request style to the working
+// MAWB/HAWB endpoints) — parsed by the global express.json (60mb limit). This avoids
+// multipart uploads, which some hosting proxies 307-redirect.
+router.post("/compare", allowLongRequest, compareDocuments);
 
 module.exports = router;
