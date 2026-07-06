@@ -12,10 +12,11 @@ const num = (key, fallback) => {
 
 const geminiConfig = {
   apiKey: process.env.GEMINI_API_KEY || "",
-  // Best model for long-document understanding + structured comparison + reasoning.
-  // Independent of the Export-AI model setting; override with GEMINI_VERIFY_MODEL.
-  // On hosts with a short reverse-proxy timeout, set it to "gemini-2.5-flash".
-  model: process.env.GEMINI_VERIFY_MODEL || "gemini-2.5-pro",
+  // gemini-2.5-flash is fast, reliable and very capable for structured document
+  // comparison — a good default so background jobs finish quickly. For maximum
+  // reasoning accuracy set GEMINI_VERIFY_MODEL=gemini-2.5-pro (the async job pattern
+  // means even a slow model no longer causes gateway timeouts).
+  model: process.env.GEMINI_VERIFY_MODEL || "gemini-2.5-flash",
   mockMode: !process.env.GEMINI_API_KEY,
 
   maxFileSizeMb: num("VERIFY_MAX_FILE_SIZE_MB", 15),
