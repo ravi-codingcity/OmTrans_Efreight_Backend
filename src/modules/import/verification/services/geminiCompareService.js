@@ -4,7 +4,9 @@ const { geminiConfig } = require("../config/geminiConfig");
 /* ------------------------------------------------------------------ */
 /*  AI comparison service — CHA Checklist vs. system PDF document(s).  */
 /*  All Gemini logic is isolated here. Given the checklist PDF and one  */
-/*  or more system PDFs, it returns a structured comparison report.     */
+/*  or more system PDFs, it returns a rich, categorized comparison      */
+/*  report (header, item-by-item, containers, certificates, SIMS,       */
+/*  duty & tax) with computed dashboard totals and document references. */
 /* ------------------------------------------------------------------ */
 
 const log = (level, msg, extra) => {
@@ -25,66 +27,80 @@ if (!geminiConfig.mockMode) {
   log("warn", "GEMINI_API_KEY not set — AI Document Verification running in MOCK mode");
 }
 
-const INSTRUCTION = `You are an expert Indian customs documentation verifier.
+// A row status vocabulary used across header/container/certificate/SIMS/item rows.
+const ROW_STATUS = ["match", "mismatch", "missing_in_system", "missing_in_checklist", "not_present"];
+
+const INSTRUCTION = `You are an expert Indian customs Bill of Entry verification AI.
 
 INPUTS:
-1. The CHA "CHECK LIST - BILL OF ENTRY FOR HOME CONSUMPTION" (the REFERENCE). It is a
-   CONSOLIDATED document — its values are gathered from several supporting documents.
-2. One or more SYSTEM documents provided by the importer. These may be an Invoice, Packing
-   List, HAWB, MAWB, Bill of Lading, Purchase Order or other supporting import documents —
-   each contributing part of the information.
+1. The CHA "CHECK LIST - BILL OF ENTRY FOR HOME CONSUMPTION" (the REFERENCE). It is CONSOLIDATED
+   from several supporting documents.
+2. One or more SYSTEM documents (Commercial/Shipping Invoice, Packing List, HAWB, MAWB, Bill of
+   Lading, Certificates, etc.) — each contributing part of the information.
 
 METHOD (semantic, not label-matching):
-- Extract structured information from the CHA Checklist.
-- Extract structured information from EVERY system document, then MERGE them into ONE
-  consolidated view of the shipment (a value may appear in only one of the system documents).
-- Field names/labels WILL differ between documents (e.g. "Consignee" vs "Importer", "Invoice
-  Value" vs "Assessable Value", "AWB No" vs "Airway Bill"). Match fields by MEANING/CONTEXT,
-  not by identical labels.
-- Compare the ACTUAL business VALUES between the checklist and the merged system view.
-- IGNORE differences of formatting, fonts, spacing, layout, letter case, punctuation, date
-  format and trivial abbreviations. Normalise before comparing (e.g. numbers, weights,
-  currency, dates).
+- Extract structured data from the CHA Checklist AND from EVERY system document, then MERGE the
+  system documents into ONE consolidated view (a value may exist in only one of them).
+- Field NAMES/labels differ between documents — match by MEANING/CONTEXT, not identical labels.
+- Compare ACTUAL business VALUES. IGNORE formatting, fonts, spacing, layout, case, punctuation
+  and date format. Normalise numbers, weights, currency and dates before comparing.
+- For EVERY compared field record its "sourceDocument" = the filename of the system document the
+  value came from (or "" if unknown).
 
-FIELDS to reconcile wherever present: Bill of Entry no & date, IEC, Importer/Consignee name &
-address, Supplier/Exporter name & address, Invoice no & date & value & currency, Purchase
-Order, Country of Origin/Consignment, Port of Loading/Discharge, HS/CTH/Tariff codes,
-Description of goods, Quantity & unit, Gross/Net weight, No. of packages, Assessable value,
-Exchange rate, Duty, BL/AWB/Container numbers, Vessel/Flight, Marks & Numbers.
+Each comparison row has a "status" that is one of:
+  "match"                : values agree,
+  "mismatch"             : present in both but differ (also use for wrong/invalid values),
+  "missing_in_system"    : in the checklist but NOT found in any system document,
+  "missing_in_checklist" : in the system documents but NOT in the checklist,
+  "not_present"          : absent from BOTH (only for optional things like SIMS).
 
-CLASSIFY every material difference as one of:
-  - "mismatch"            : present in both but the values differ,
-  - "incorrect"           : a value appears wrong/invalid/inconsistent,
-  - "missing_in_system"   : in the checklist but NOT found in ANY system document
-                            (may indicate a missing supporting document),
-  - "missing_in_checklist": in the system documents but NOT in the checklist,
-  - "inconsistency"       : any other detected inconsistency (incl. conflicting values across
-                            the system documents themselves).
+Compare and report the following.
 
-Return ONLY a JSON object with EXACTLY this shape:
+A) HEADER FIELDS — compare each of: Invoice Value, Invoice Date, Invoice Number, SVB Reference,
+   IGM Number, Port of Origin, Port of Shipment, Country of Origin, Country of Consignment,
+   MBL/MAWB Number, HBL/HAWB Number, MAWB/HAWB Date, Bill of Entry Date, Number of Packages,
+   BDL/BL Gross Weight, Marks & Numbers, Shipper Details, Consignee Details.
+
+B) ITEM DETAILS — HIGHEST PRIORITY. Do an item-by-item comparison between the checklist and the
+   Commercial/Shipping Invoice (and packing list). For each item capture: description, hsnCode,
+   quantity, unit, unitPrice, totalValue, countryOfOrigin, a status and detail. Also list
+   "missingItems" (in the checklist but not in the system docs) and "extraItems" (in the system
+   docs but not in the checklist). Flag quantity, HSN, value and description mismatches.
+
+C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number.
+
+D) CERTIFICATES — Certificate Type, Certificate Number and any other certificate references.
+
+E) SIMS — SIMS Number and SIMS details (use status "not_present" if neither document has it).
+
+F) DUTY & TAX — determine whether the CHA Checklist contains: Duty (Basic Customs Duty),
+   Social Welfare Surcharge, IGST. For each charge found, capture name, amount, percentage, and
+   whether it matches the supporting documents (matches: true/false, or null if not applicable).
+
+G) missingDocuments — supporting documents the checklist clearly relies on but that were NOT
+   provided among the system documents (else []).
+
+Return ONLY a JSON object with EXACTLY this shape (a "row" = {field, checklistValue, systemValue,
+status, sourceDocument, detail}); use null for absent values, never invent data:
 {
-  "match": boolean,
-  "score": number,
   "summary": string,
-  "matchedFields": [ { "field": string, "value": string, "sourceDocument": string } ],
-  "differences": [
-    {
-      "field": string,
-      "type": "mismatch" | "incorrect" | "missing_in_system" | "missing_in_checklist" | "inconsistency",
-      "checklistValue": string | null,
-      "systemValue": string | null,
-      "sourceDocument": string | null,
-      "detail": string
-    }
-  ],
+  "header": [ row ],
+  "items": {
+    "rows": [ { "description": string, "hsnCode": string|null, "quantity": string|null,
+                "unit": string|null, "unitPrice": string|null, "totalValue": string|null,
+                "countryOfOrigin": string|null, "status": string, "sourceDocument": string|null,
+                "detail": string } ],
+    "missingItems": [ string ],
+    "extraItems": [ string ]
+  },
+  "containers": [ row ],
+  "certificates": [ row ],
+  "sims": [ row ],
+  "dutyTax": [ { "name": string, "amount": string|null, "percentage": string|null,
+                 "present": boolean, "matches": boolean|null, "detail": string } ],
   "missingDocuments": [ string ]
 }
-- "sourceDocument" is the filename of the system document a value came from (or null/"" if unknown).
-- "missingDocuments" lists any supporting document the checklist clearly relies on but which was
-  not provided among the system documents (else an empty array).
-- "score" is overall consistency 0-100.
-- "match" MUST be false if "differences" contains ANY mismatch / incorrect / missing_in_system item.
-- Do NOT invent values — use null when a value is absent. Return valid JSON only, no prose.`;
+Return valid JSON only — no prose, no markdown.`;
 
 function extractJson(text) {
   const fenced = String(text).match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -118,75 +134,179 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-// Normalize whatever the model returns into the strict result shape.
-function normalizeResult(parsed) {
-  const diffTypes = ["mismatch", "incorrect", "missing_in_system", "missing_in_checklist", "inconsistency"];
-  const differences = Array.isArray(parsed.differences)
-    ? parsed.differences
-        .filter((d) => d && (d.field || d.detail))
-        .map((d) => ({
-          field: String(d.field || "").trim() || "—",
-          type: diffTypes.includes(d.type) ? d.type : "inconsistency",
-          checklistValue: d.checklistValue == null ? null : String(d.checklistValue),
-          systemValue: d.systemValue == null ? null : String(d.systemValue),
-          sourceDocument: d.sourceDocument == null ? "" : String(d.sourceDocument),
-          detail: String(d.detail || "").trim(),
-        }))
-    : [];
-  const matchedFields = Array.isArray(parsed.matchedFields)
-    ? parsed.matchedFields
-        .filter((f) => f && f.field)
-        .map((f) => ({ field: String(f.field), value: f.value == null ? "" : String(f.value), sourceDocument: f.sourceDocument == null ? "" : String(f.sourceDocument) }))
-    : [];
-  const missingDocuments = Array.isArray(parsed.missingDocuments)
-    ? parsed.missingDocuments.filter(Boolean).map(String)
-    : [];
+/* --------------------------- normalization --------------------------- */
+const str = (v) => (v == null ? null : String(v));
+const strOr = (v, d = "") => (v == null ? d : String(v));
 
-  const blocking = differences.some((d) => ["mismatch", "incorrect", "missing_in_system"].includes(d.type)) || missingDocuments.length > 0;
-  const match = parsed.match === true && !blocking;
-  let score = Number(parsed.score);
-  if (!Number.isFinite(score)) score = match ? 100 : Math.max(0, 100 - differences.length * 10);
-  score = Math.max(0, Math.min(100, Math.round(score)));
+function normRow(r, defaultField) {
+  const status = ROW_STATUS.includes(r && r.status) ? r.status : "mismatch";
+  return {
+    field: strOr(r && r.field, defaultField || "—") || "—",
+    checklistValue: str(r && r.checklistValue),
+    systemValue: str(r && r.systemValue),
+    status,
+    sourceDocument: strOr(r && r.sourceDocument, ""),
+    detail: strOr(r && r.detail, ""),
+  };
+}
+const normRows = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).map((r) => normRow(r)) : []);
+
+function normItemRow(r) {
+  const status = ROW_STATUS.includes(r && r.status) ? r.status : "mismatch";
+  return {
+    description: strOr(r && r.description, "—") || "—",
+    hsnCode: str(r && r.hsnCode),
+    quantity: str(r && r.quantity),
+    unit: str(r && r.unit),
+    unitPrice: str(r && r.unitPrice),
+    totalValue: str(r && r.totalValue),
+    countryOfOrigin: str(r && r.countryOfOrigin),
+    status,
+    sourceDocument: strOr(r && r.sourceDocument, ""),
+    detail: strOr(r && r.detail, ""),
+  };
+}
+
+function normDutyTax(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((d) => d && (d.name || d.amount || d.percentage))
+    .map((d) => ({
+      name: strOr(d.name, "—"),
+      amount: str(d.amount),
+      percentage: str(d.percentage),
+      present: d.present !== false,
+      matches: typeof d.matches === "boolean" ? d.matches : null,
+      detail: strOr(d.detail, ""),
+    }));
+}
+
+function normalizeResult(parsed) {
+  const header = normRows(parsed.header);
+  const containers = normRows(parsed.containers);
+  const certificates = normRows(parsed.certificates);
+  const sims = normRows(parsed.sims);
+  const itemsRaw = parsed.items || {};
+  const items = {
+    rows: Array.isArray(itemsRaw.rows) ? itemsRaw.rows.filter(Boolean).map(normItemRow) : [],
+    missingItems: Array.isArray(itemsRaw.missingItems) ? itemsRaw.missingItems.filter(Boolean).map(String) : [],
+    extraItems: Array.isArray(itemsRaw.extraItems) ? itemsRaw.extraItems.filter(Boolean).map(String) : [],
+  };
+  const dutyTax = normDutyTax(parsed.dutyTax);
+  const missingDocuments = Array.isArray(parsed.missingDocuments) ? parsed.missingDocuments.filter(Boolean).map(String) : [];
+
+  // All field-style rows that count toward the dashboard (exclude "not_present").
+  const fieldRows = [...header, ...containers, ...certificates, ...sims];
+  const itemRows = items.rows;
+  const comparable = [...fieldRows, ...itemRows].filter((r) => r.status !== "not_present");
+
+  const isMatch = (r) => r.status === "match";
+  const isMismatch = (r) => r.status === "mismatch";
+  const isMissing = (r) => r.status === "missing_in_system" || r.status === "missing_in_checklist";
+
+  const matchedRows = comparable.filter(isMatch);
+  const mismatchedRows = comparable.filter(isMismatch);
+  const missingRows = comparable.filter(isMissing);
+
+  const missingExtraItems = items.missingItems.length + items.extraItems.length;
+
+  const totalMatched = matchedRows.length;
+  const totalUnmatched = mismatchedRows.length;
+  const totalMissing = missingRows.length + missingExtraItems;
+  const totalCompared = totalMatched + totalUnmatched + totalMissing;
+  const matchPercentage = totalCompared === 0 ? 0 : Math.round((totalMatched / totalCompared) * 100);
+
+  const match =
+    totalUnmatched === 0 &&
+    totalMissing === 0 &&
+    missingDocuments.length === 0 &&
+    dutyTax.every((d) => d.matches !== false);
+
+  // Field-label helper for item rows in the summary lists.
+  const itemLabel = (r) => `Item: ${r.description}`;
+
+  const matchedFields = [
+    ...matchedRows.filter((r) => !itemRows.includes(r)).map((r) => ({ field: r.field, value: r.systemValue ?? r.checklistValue ?? "", sourceDocument: r.sourceDocument })),
+    ...matchedRows.filter((r) => itemRows.includes(r)).map((r) => ({ field: itemLabel(r), value: r.description, sourceDocument: r.sourceDocument })),
+  ];
+  const unmatchedFields = mismatchedRows.map((r) => ({
+    field: itemRows.includes(r) ? itemLabel(r) : r.field,
+    expected: r.systemValue,
+    actual: r.checklistValue,
+    reason: r.detail || "Values differ.",
+    sourceDocument: r.sourceDocument,
+  }));
+  const missingInfo = [
+    ...missingRows.map((r) => ({
+      field: itemRows.includes(r) ? itemLabel(r) : r.field,
+      where: r.status === "missing_in_system" ? "system" : "checklist",
+      sourceDocument: r.sourceDocument,
+      detail: r.detail || "",
+    })),
+    ...items.missingItems.map((it) => ({ field: `Item: ${it}`, where: "system", sourceDocument: "", detail: "Item present in the CHA Checklist but not found in the system documents." })),
+    ...items.extraItems.map((it) => ({ field: `Item: ${it}`, where: "checklist", sourceDocument: "", detail: "Item present in the system documents but not in the CHA Checklist." })),
+  ];
 
   return {
     match,
-    score,
-    summary: String(parsed.summary || "").trim() || (match ? "The documents are consistent." : "Differences were found between the documents."),
+    overallStatus: match ? "match" : "mismatch",
+    score: matchPercentage,
+    summary: strOr(parsed.summary, "").trim() || (match ? "All important information is consistent across the documents." : "Differences were found between the CHA Checklist and the system documents."),
+    dashboard: { totalCompared, totalMatched, totalUnmatched, totalMissing, matchPercentage },
+    header,
+    items,
+    containers,
+    certificates,
+    sims,
+    dutyTax,
     matchedFields,
-    differences,
+    unmatchedFields,
+    missingInfo,
     missingDocuments,
-    counts: {
-      matched: matchedFields.length,
-      differences: differences.length,
-      mismatched: differences.filter((d) => d.type === "mismatch" || d.type === "incorrect").length,
-      missingInSystem: differences.filter((d) => d.type === "missing_in_system").length,
-      missingInChecklist: differences.filter((d) => d.type === "missing_in_checklist").length,
-      missingDocuments: missingDocuments.length,
-    },
   };
 }
 
 // Deterministic mock so the feature works before a key is provisioned.
 function mockResult(checklistName, systemNames) {
-  return {
-    mock: true,
-    match: false,
-    score: 82,
+  const src = systemNames[0] || "";
+  const raw = {
     summary:
-      "MOCK MODE (no GEMINI_API_KEY configured). This is sample output so you can preview the workflow. " +
-      "Set GEMINI_API_KEY on the server to run a real AI comparison of the CHA Checklist against your system documents.",
-    matchedFields: [
-      { field: "Importer Name", value: "(sample) matched", sourceDocument: systemNames[0] || "" },
-      { field: "Invoice Number", value: "(sample) matched", sourceDocument: systemNames[0] || "" },
+      "MOCK MODE (no GEMINI_API_KEY configured). Sample categorized output so you can preview the full report. " +
+      "Set GEMINI_API_KEY on the server to run a real AI comparison.",
+    header: [
+      { field: "Invoice Number", checklistValue: "INV-2026-7781", systemValue: "INV-2026-7781", status: "match", sourceDocument: src, detail: "" },
+      { field: "Invoice Value", checklistValue: "USD 12,50,000", systemValue: "USD 12,05,000", status: "mismatch", sourceDocument: src, detail: "Invoice value differs." },
+      { field: "Consignee Details", checklistValue: "ACME IMPORTS INC", systemValue: "ACME IMPORTS INC", status: "match", sourceDocument: src, detail: "" },
+      { field: "MBL / MAWB Number", checklistValue: "OMMBL-2026-7781", systemValue: null, status: "missing_in_system", sourceDocument: "", detail: "Not found in the system documents." },
     ],
-    differences: [
-      { field: "Assessable Value", type: "mismatch", checklistValue: "(sample) 12,50,000", systemValue: "(sample) 12,05,000", sourceDocument: systemNames[0] || "", detail: "Sample mismatch — enable live AI for real results." },
-      { field: "HS Code", type: "missing_in_system", checklistValue: "(sample) 61103010", systemValue: null, sourceDocument: "", detail: "Sample missing field — enable live AI for real results." },
+    items: {
+      rows: [
+        { description: "COTTON T-SHIRTS", hsnCode: "6109", quantity: "1000", unit: "PCS", unitPrice: "5.00", totalValue: "5000", countryOfOrigin: "IN", status: "match", sourceDocument: src, detail: "" },
+        { description: "COTTON TROUSERS", hsnCode: "6203", quantity: "500", unit: "PCS", unitPrice: "8.00", totalValue: "4000", countryOfOrigin: "IN", status: "mismatch", sourceDocument: src, detail: "Quantity differs (500 vs 450)." },
+      ],
+      missingItems: ["LEATHER BELTS"],
+      extraItems: [],
+    },
+    containers: [
+      { field: "Container Number", checklistValue: "MSKU1234567", systemValue: "MSKU1234567", status: "match", sourceDocument: "Bill of Lading", detail: "" },
+      { field: "Seal Number", checklistValue: "SL889900", systemValue: "SL889901", status: "mismatch", sourceDocument: "Bill of Lading", detail: "Seal number differs." },
+    ],
+    certificates: [
+      { field: "Certificate Number", checklistValue: "COO-99812", systemValue: "COO-99812", status: "match", sourceDocument: "Certificate", detail: "" },
+    ],
+    sims: [{ field: "SIMS Number", checklistValue: null, systemValue: null, status: "not_present", sourceDocument: "", detail: "SIMS not applicable / not present." }],
+    dutyTax: [
+      { name: "Basic Customs Duty", amount: "1,25,000", percentage: "10", present: true, matches: null, detail: "" },
+      { name: "Social Welfare Surcharge", amount: "12,500", percentage: "10", present: true, matches: null, detail: "" },
+      { name: "IGST", amount: "2,47,500", percentage: "18", present: true, matches: null, detail: "" },
     ],
     missingDocuments: [],
-    counts: { matched: 2, differences: 2, mismatched: 1, missingInSystem: 1, missingInChecklist: 0, missingDocuments: 0 },
-    meta: { checklist: checklistName, systemDocuments: systemNames },
   };
+  const result = normalizeResult(raw);
+  result.mock = true;
+  result.summary = raw.summary;
+  result.meta = { checklist: checklistName, systemDocuments: systemNames };
+  return result;
 }
 
 async function generateWithRetry(parts) {
@@ -245,7 +365,7 @@ async function compareChecklist(checklist, systemDocs) {
   const result = normalizeResult(extractJson(text));
   result.meta = { checklist: checklist.originalname, systemDocuments: systemNames, model: geminiConfig.model };
   result.usage = usage;
-  log("info", "comparison complete", { match: result.match, score: result.score, diffs: result.counts.differences });
+  log("info", "comparison complete", { match: result.match, score: result.score, ...result.dashboard });
   return result;
 }
 
