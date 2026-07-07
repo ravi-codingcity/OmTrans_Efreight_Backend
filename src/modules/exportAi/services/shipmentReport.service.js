@@ -71,9 +71,11 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   };
   const siContainerNos = containersFromDocs(siDocs);
   const sbContainerNos = containersFromDocs(sbDocs);
-  // In Multiple-LEO mode, container numbers are shipment-specific and must come from
-  // THIS shipment's LEO — never from the shared Shipping Instruction.
-  let containerNos = (!options.multiLeo && siContainerNos.length) ? siContainerNos : sbContainerNos;
+  // In Multiple-LEO (split) and consolidated modes, container numbers come from the
+  // LEO/Shipping Bill(s) — never the shared Shipping Instruction. Only the plain
+  // single-LEO workflow prefers the SI's container list.
+  const preferSiContainers = !options.multiLeo && !options.consolidated && siContainerNos.length;
+  let containerNos = preferSiContainers ? siContainerNos : sbContainerNos;
   if (!containerNos.length) {
     containerNos = [];
     orderedDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(containerNos, c.containerNo)));
@@ -295,21 +297,39 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   // are kept as the fallback. In Multiple-LEO mode this override is skipped — each
   // shipment's parties must come from its own LEO (a shared SI cannot dictate the
   // shipper/consignee for every different exporter).
-  if (!options.multiLeo) {
+  const applyOverride = (label, value) => {
+    if (isEmpty(value)) return;
+    const s = summary.find((x) => x.label === label);
+    if (s) { s.value = value; s.found = true; s.blank = false; }
+  };
+
+  if (options.consolidated) {
+    // Multiple-LEO with Single HBL: combine ALL unique parties from EVERY LEO so the
+    // one consolidated HBL lists every exporter (and merges consignee / notify),
+    // preserving each complete address and removing exact duplicates.
+    const combineParties = (nameKey, addrKey) => {
+      const blocks = [];
+      for (const d of sbDocs) {
+        let parts = [d.extractedFields && d.extractedFields[nameKey], d.extractedFields && d.extractedFields[addrKey]]
+          .filter((x) => !isEmpty(x)).map(String);
+        parts = parts.filter((p, i) => !parts.some((o, j) => j !== i && o.toLowerCase().includes(p.toLowerCase())));
+        const block = parts.join("\n").trim();
+        if (block && !blocks.some((b) => normKey(b) === normKey(block))) blocks.push(block);
+      }
+      return blocks.join("\n\n");
+    };
+    applyOverride("Shipper / Exporter", combineParties("exporter_name", "exporter_address"));
+    applyOverride("Consignee", combineParties("consignee_name", "consignee_address"));
+    applyOverride("Notify Party", combineParties("notify_party", "notify_party_address"));
+  } else if (!options.multiLeo) {
     const siAddress = (nameKey, addrKey) => {
       let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
       parts = parts.filter((p, i) => !parts.some((o, j) => j !== i && o.toLowerCase().includes(p.toLowerCase())));
       return parts.join("\n");
     };
-    const siOverrides = {
-      "Shipper / Exporter": siAddress("exporter_name", "exporter_address"),
-      Consignee: siAddress("consignee_name", "consignee_address"),
-      "Notify Party": siAddress("notify_party", "notify_party_address"),
-    };
-    summary.forEach((s) => {
-      const ov = siOverrides[s.label];
-      if (!isEmpty(ov)) { s.value = ov; s.found = true; s.blank = false; }
-    });
+    applyOverride("Shipper / Exporter", siAddress("exporter_name", "exporter_address"));
+    applyOverride("Consignee", siAddress("consignee_name", "consignee_address"));
+    applyOverride("Notify Party", siAddress("notify_party", "notify_party_address"));
   }
 
   const vesselEtd = firstVal(bookingDocs, "vessel_etd");

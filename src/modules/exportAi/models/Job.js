@@ -29,7 +29,10 @@ const jobSchema = new mongoose.Schema(
     // into one job per shipment, all sharing the same uploadSessionId. Single-LEO
     // jobs get their own session of one shipment (fully backward compatible).
     uploadSessionId: { type: String, index: true },
-    shipmentType: { type: String, enum: ["single", "multiple"], default: "single" },
+    // single           -> 1 LEO -> 1 HBL/MBL/ISF
+    // multiple          -> N LEOs -> N HBL/MBL/ISF (split, one job per LEO)
+    // multiple_single   -> N LEOs -> 1 consolidated HBL/MBL/ISF
+    shipmentType: { type: String, enum: ["single", "multiple", "multiple_single"], default: "single" },
     shipmentIndex: { type: Number, default: 1 }, // 1-based position within the session
     exporterName: { type: String, trim: true },
     shippingBillNumber: { type: String, trim: true },

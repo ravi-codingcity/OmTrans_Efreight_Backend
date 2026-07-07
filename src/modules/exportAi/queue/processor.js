@@ -182,7 +182,7 @@ async function processJob({ jobId, batchDir }) {
     // A shipment is built from one LEO/Shipping Bill + the shared documents. In
     // multiLeo mode `leoDoc` scopes all shipment-specific data (exporter, goods,
     // SB number/date, gross weight, quantity) to exactly that LEO.
-    const buildShipment = (docs, hblNumber, { multiLeo = false, leoDoc = null } = {}) => {
+    const buildShipment = (docs, hblNumber, { multiLeo = false, leoDoc = null, consolidated: consolidate = false } = {}) => {
       const recon = reconcileDocuments(docs);
       const consolidated = {
         fields: recon.consolidated,
@@ -191,7 +191,7 @@ async function processJob({ jobId, batchDir }) {
         missingFields: recon.missingFields,
         validationScore: recon.validationScore,
       };
-      const srData = buildShipmentReportData(consolidated, docs, { location, multiLeo, leoDoc });
+      const srData = buildShipmentReportData(consolidated, docs, { location, multiLeo, leoDoc, consolidated: consolidate });
       srData.hblNumber = hblNumber || "";
       srData.bookingNumber = bookingNumberOf(docs) || "";
       const analysis = { ...buildAnalysis(consolidated, docs), weightCheck: srData.weightCheck || null };
@@ -203,13 +203,17 @@ async function processJob({ jobId, batchDir }) {
     // that merely reference an SB number never create extra shipments, and dedupe
     // by Shipping Bill number so the same LEO scanned twice counts once.
     const leoDocs = dedupeLeoDocuments(extracted.filter(isLeoDocument));
+    // "multiple"        -> one HBL/MBL/ISF per LEO (split).
+    // "multiple_single" -> ONE consolidated HBL/MBL/ISF merging every LEO.
+    // "single"          -> the standard single-LEO workflow.
     const isMulti = job.shipmentType === "multiple" && leoDocs.length >= 2;
+    const isConsolidated = job.shipmentType === "multiple_single";
 
-    await updateStatus(job, JOB_STATUS.GENERATING, 88, isMulti ? `Building ${leoDocs.length} shipments` : "Building shipment report");
+    await updateStatus(job, JOB_STATUS.GENERATING, 88, isMulti ? `Building ${leoDocs.length} shipments` : isConsolidated ? `Consolidating ${leoDocs.length} LEO(s) into one shipment` : "Building shipment report");
 
     if (!isMulti) {
-      // ── Single-LEO workflow (unchanged) ──
-      const { consolidated, srData, analysis } = buildShipment(extracted, job.hblNumber);
+      // ── Single-LEO, or Multiple-LEO-with-Single-HBL (consolidated) workflow ──
+      const { consolidated, srData, analysis } = buildShipment(extracted, job.hblNumber, { consolidated: isConsolidated });
       const leo0 = leoDocs[0];
       const fresh = await Job.findById(job._id);
       fresh.consolidated = consolidated;

@@ -40,7 +40,8 @@ const createJob = asyncHandler(async (req, res) => {
   }
 
   const aiModel = resolveModel((req.body && req.body.model) || req.user.preferredAiModel);
-  const shipmentType = String((req.body && req.body.shipmentType) || "single").toLowerCase() === "multiple" ? "multiple" : "single";
+  const rawShipmentType = String((req.body && req.body.shipmentType) || "single").toLowerCase();
+  const shipmentType = ["single", "multiple", "multiple_single"].includes(rawShipmentType) ? rawShipmentType : "single";
 
   const job = await Job.create({
     owner: req.user._id,
