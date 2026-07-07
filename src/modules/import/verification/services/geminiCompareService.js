@@ -1,3 +1,4 @@
+const crypto = require("node:crypto");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { geminiConfig } = require("../config/geminiConfig");
 
@@ -47,6 +48,19 @@ METHOD (semantic, not label-matching):
 - For EVERY compared field record its "sourceDocument" = the filename of the system document the
   value came from (or "" if unknown).
 
+DETERMINISTIC NORMALISATION (apply these rules the SAME way every time so identical documents
+ALWAYS produce the identical result — never guess):
+- Numbers/amounts/quantities/weights: strip currency symbols, codes, thousands separators and
+  units; compare NUMERICALLY. "1,000.00", "1000", "1000.0" and "USD 1,000" are all EQUAL.
+  Treat values equal if they differ only by rounding to 2 decimals.
+- HSN/CTH/Tariff codes: compare DIGITS ONLY (ignore spaces/dots). Treat as MATCH if equal, or if
+  one is a leading prefix of the other (e.g. 6-digit "610910" matches 8-digit "61091000").
+- Text (descriptions, names, addresses, ports): case-insensitive; ignore punctuation, extra
+  whitespace and line breaks; treat common abbreviations/synonyms and word-order differences as
+  EQUAL when they clearly refer to the same thing.
+- Only report a difference when values GENUINELY differ after this normalisation. When in doubt
+  and the values are plausibly the same, treat as "match" (avoid false positives).
+
 Each comparison row has a "status" that is one of:
   "match"                : values agree,
   "mismatch"             : present in both but differ (also use for wrong/invalid values),
@@ -61,11 +75,19 @@ A) HEADER FIELDS — compare each of: Invoice Value, Invoice Date, Invoice Numbe
    MBL/MAWB Number, HBL/HAWB Number, MAWB/HAWB Date, Bill of Entry Date, Number of Packages,
    BDL/BL Gross Weight, Marks & Numbers, Shipper Details, Consignee Details.
 
-B) ITEM DETAILS — HIGHEST PRIORITY. Do an item-by-item comparison between the checklist and the
-   Commercial/Shipping Invoice (and packing list). For each item capture: description, hsnCode,
-   quantity, unit, unitPrice, totalValue, countryOfOrigin, a status and detail. Also list
-   "missingItems" (in the checklist but not in the system docs) and "extraItems" (in the system
-   docs but not in the checklist). Flag quantity, HSN, value and description mismatches.
+B) ITEM DETAILS — HIGHEST PRIORITY. Item-by-item comparison between the checklist and the
+   Commercial/Shipping Invoice (and packing list). MATCH items across the documents by BEST FIT
+   (primarily by HSN code, then by description similarity) — do NOT rely on row order, which
+   often differs. For each matched item capture: description, hsnCode, quantity, unit, unitPrice,
+   totalValue, countryOfOrigin, a status and detail. Apply the DETERMINISTIC NORMALISATION rules
+   above to every value:
+   - status = "match" when the item's description, HSN, quantity, unit price and total value are
+     all equal after normalisation. Set status = "mismatch" ONLY when a value genuinely differs,
+     and in "detail" name exactly which field(s) differ and the two values.
+   - "missingItems": items in the checklist with no corresponding item in the system docs.
+   - "extraItems": items in the system docs with no corresponding item in the checklist.
+   Be conservative: if an item clearly corresponds and its values normalise to the same thing,
+   report "match" — do not invent mismatches.
 
 C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number. List each of
    these AT MOST ONCE — never output duplicate rows for the same field.
@@ -332,10 +354,29 @@ function mockResult(checklistName, systemNames) {
   return result;
 }
 
+function buildGenerationConfig() {
+  const cfg = {
+    // temperature 0 = deterministic: identical documents yield identical results.
+    temperature: 0,
+    topP: 1,
+    topK: 1,
+    // Generous cap so large item lists are never truncated (truncated JSON was a
+    // cause of parse failures / inconsistent results).
+    maxOutputTokens: 16384,
+    responseMimeType: "application/json",
+  };
+  // Disable "thinking" on 2.5 Flash — it adds significant latency but little value
+  // for this structured-extraction task, so this is the biggest speed win.
+  if (geminiConfig.disableThinking && /flash/i.test(geminiConfig.model)) {
+    cfg.thinkingConfig = { thinkingBudget: 0 };
+  }
+  return cfg;
+}
+
 async function generateWithRetry(parts) {
   const model = client.getGenerativeModel({
     model: geminiConfig.model,
-    generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+    generationConfig: buildGenerationConfig(),
   });
   const maxAttempts = 2;
   for (let attempt = 1; ; attempt += 1) {
@@ -362,6 +403,41 @@ async function generateWithRetry(parts) {
   }
 }
 
+/* ------------------------- result cache ------------------------- */
+// Identical inputs (same file bytes + model + prompt) return the exact same result
+// instantly — improving both consistency and performance on repeat comparisons.
+const resultCache = new Map(); // key -> { result, at }
+
+function cacheKey(checklist, systemDocs) {
+  const h = crypto.createHash("sha256");
+  h.update(geminiConfig.model);
+  h.update("v2"); // bump when the prompt/output shape changes
+  h.update(String(checklist.originalname || ""));
+  h.update(checklist.buffer);
+  for (const d of systemDocs) {
+    h.update(String(d.originalname || ""));
+    h.update(d.buffer);
+  }
+  return h.digest("hex");
+}
+
+function cacheGet(key) {
+  if (!geminiConfig.cacheTtlMs) return null;
+  const hit = resultCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > geminiConfig.cacheTtlMs) { resultCache.delete(key); return null; }
+  return JSON.parse(JSON.stringify(hit.result)); // clone so callers can't mutate the cache
+}
+
+function cacheSet(key, result) {
+  if (!geminiConfig.cacheTtlMs) return;
+  resultCache.set(key, { result, at: Date.now() });
+  if (resultCache.size > 100) { // evict oldest to bound memory
+    const oldest = [...resultCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+    if (oldest) resultCache.delete(oldest[0]);
+  }
+}
+
 /**
  * Compare a CHA Checklist PDF against one or more system PDFs.
  * @param {{buffer:Buffer, originalname:string, mimetype:string}} checklist
@@ -372,6 +448,14 @@ async function compareChecklist(checklist, systemDocs) {
   const systemNames = systemDocs.map((d) => d.originalname);
   if (geminiConfig.mockMode) {
     return mockResult(checklist.originalname, systemNames);
+  }
+
+  const key = cacheKey(checklist, systemDocs);
+  const cached = cacheGet(key);
+  if (cached) {
+    log("info", "cache hit — returning identical result", { checklist: checklist.originalname });
+    cached.cached = true;
+    return cached;
   }
 
   const parts = [
@@ -388,6 +472,7 @@ async function compareChecklist(checklist, systemDocs) {
   const result = normalizeResult(extractJson(text));
   result.meta = { checklist: checklist.originalname, systemDocuments: systemNames, model: geminiConfig.model };
   result.usage = usage;
+  cacheSet(key, result);
   log("info", "comparison complete", { match: result.match, score: result.score, ...result.dashboard });
   return result;
 }

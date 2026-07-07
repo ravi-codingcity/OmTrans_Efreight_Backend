@@ -26,6 +26,14 @@ const geminiConfig = {
   // gateway timeout so the API always returns a clean JSON error (with CORS
   // headers) instead of the proxy's header-less 504 page.
   aiTimeoutMs: num("VERIFY_AI_TIMEOUT_MS", 110000),
+
+  // Disable Gemini 2.5 Flash "thinking" for much faster responses (set
+  // VERIFY_DISABLE_THINKING=false to re-enable it).
+  disableThinking: process.env.VERIFY_DISABLE_THINKING !== "false",
+
+  // Cache identical comparisons (same files + model) so re-runs are instant and
+  // return the exact same result. 0 disables the cache.
+  cacheTtlMs: num("VERIFY_CACHE_TTL_MS", 30 * 60 * 1000),
 };
 
 module.exports = { geminiConfig };
