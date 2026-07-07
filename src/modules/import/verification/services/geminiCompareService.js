@@ -94,10 +94,26 @@ C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number.
 
 D) CERTIFICATES — Certificate Number and any other certificate references. Do NOT include a
    "Certificate Type" field.
+   Also inspect the CEPA certificate ("CEPA TJD-4350" / "COMPREHENSIVE ECONOMIC PARTNERSHIP
+   AGREEMENT BETWEEN JAPAN AND THE REPUBLIC OF INDIA" — the same document the Certificate Number
+   comes from) for the "ISSUED RETROACTIVELY" field/box and report it in "issuedRetroactively":
+     - present = true if the field/label exists on the certificate, else false.
+     - marked  = true if its checkbox/box is ticked/marked/checked, false if present but NOT
+                 marked, null if the field is not present.
 
 Do NOT extract, compare or output "SVB Reference" or "Certificate Type" anywhere in the result.
 
-E) SIMS — SIMS Number and SIMS details (use status "not_present" if neither document has it).
+E) SIMS — MULTI-RECORD. The CHA Checklist may list MULTIPLE SIMS Number + SIMS Date entries, and
+   the uploaded SIMS document(s) contain corresponding entries. Extract EVERY SIMS Number and its
+   SIMS Date from BOTH sides. MATCH records by SIMS Number (normalise: digits/letters only, ignore
+   spaces/dots/case), then compare their SIMS Dates (normalise date format). For each record set
+   "status":
+     - "match"             : SIMS Number found on both sides AND dates equal,
+     - "mismatch"          : SIMS Number found on both sides but the dates differ,
+     - "missing_in_system" : in the checklist but NOT in any SIMS document,
+     - "extra_in_system"   : in a SIMS document but NOT in the checklist.
+   Give one record per distinct SIMS Number. If neither side has any SIMS data, return an empty
+   "records" array.
 
 F) DUTY & TAX — determine whether the CHA Checklist contains: Duty (Basic Customs Duty),
    Social Welfare Surcharge, IGST. For each charge found, capture name, amount, percentage, and
@@ -121,7 +137,11 @@ status, sourceDocument, detail}); use null for absent values, never invent data:
   },
   "containers": [ row ],
   "certificates": [ row ],
-  "sims": [ row ],
+  "issuedRetroactively": { "present": boolean, "marked": boolean|null, "sourceDocument": string|null, "detail": string },
+  "sims": {
+    "records": [ { "simsNumber": string, "simsDate": string|null, "status": string,
+                   "sourceDocument": string|null, "detail": string } ]
+  },
   "dutyTax": [ { "name": string, "amount": string|null, "percentage": string|null,
                  "present": boolean, "matches": boolean|null, "detail": string } ],
   "missingDocuments": [ string ]
@@ -207,6 +227,42 @@ function normDutyTax(arr) {
     }));
 }
 
+// Multi-record SIMS: one entry per distinct SIMS Number, with its date + match status.
+const SIMS_STATUS = ["match", "mismatch", "missing_in_system", "extra_in_system"];
+function normSimsRecords(raw) {
+  const arr = raw && Array.isArray(raw.records) ? raw.records : Array.isArray(raw) ? raw : [];
+  return arr
+    .filter((r) => r && (r.simsNumber || r.simsDate))
+    .map((r) => ({
+      simsNumber: strOr(r.simsNumber, "—") || "—",
+      simsDate: str(r.simsDate),
+      status: SIMS_STATUS.includes(r && r.status) ? r.status : "mismatch",
+      sourceDocument: strOr(r && r.sourceDocument, ""),
+      detail: strOr(r && r.detail, ""),
+    }));
+}
+function buildSims(raw) {
+  const records = normSimsRecords(raw);
+  return {
+    records,
+    checklistCount: records.filter((r) => r.status !== "extra_in_system").length,
+    systemCount: records.filter((r) => r.status !== "missing_in_system").length,
+    matchedCount: records.filter((r) => r.status === "match").length,
+    unmatchedCount: records.filter((r) => r.status === "mismatch").length,
+    missingCount: records.filter((r) => r.status === "missing_in_system").length,
+    extraCount: records.filter((r) => r.status === "extra_in_system").length,
+  };
+}
+
+// "ISSUED RETROACTIVELY" on the CEPA certificate → present / marked status.
+function normIssuedRetroactively(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const present = raw.present === true;
+  const marked = present ? (raw.marked === true ? true : raw.marked === false ? false : null) : null;
+  const status = !present ? "not_found" : marked ? "present_marked" : "present_not_marked";
+  return { present, marked, status, sourceDocument: strOr(raw.sourceDocument, ""), detail: strOr(raw.detail, "") };
+}
+
 // Fields explicitly removed from the verification report.
 const DROP_FIELD_RE = /^\s*(svb\s*ref(erence)?|certificate\s*type)\s*$/i;
 const keepField = (r) => r && !DROP_FIELD_RE.test(String(r.field || ""));
@@ -230,7 +286,8 @@ function normalizeResult(parsed) {
   const header = cleanRows(parsed.header);
   const containers = cleanRows(parsed.containers);
   const certificates = cleanRows(parsed.certificates);
-  const sims = cleanRows(parsed.sims);
+  const sims = buildSims(parsed.sims);
+  const issuedRetroactively = normIssuedRetroactively(parsed.issuedRetroactively);
   const itemsRaw = parsed.items || {};
   const items = {
     rows: Array.isArray(itemsRaw.rows) ? itemsRaw.rows.filter(Boolean).map(normItemRow) : [],
@@ -240,14 +297,24 @@ function normalizeResult(parsed) {
   const dutyTax = normDutyTax(parsed.dutyTax);
   const missingDocuments = Array.isArray(parsed.missingDocuments) ? parsed.missingDocuments.filter(Boolean).map(String) : [];
 
+  // SIMS records mapped to row-shape so they count toward the dashboard & summaries.
+  const simsRows = sims.records.map((r) => ({
+    field: `SIMS No. ${r.simsNumber}${r.simsDate ? ` (${r.simsDate})` : ""}`,
+    checklistValue: r.simsDate,
+    systemValue: r.simsDate,
+    status: r.status,
+    sourceDocument: r.sourceDocument,
+    detail: r.detail,
+  }));
+
   // All field-style rows that count toward the dashboard (exclude "not_present").
-  const fieldRows = [...header, ...containers, ...certificates, ...sims];
+  const fieldRows = [...header, ...containers, ...certificates, ...simsRows];
   const itemRows = items.rows;
   const comparable = [...fieldRows, ...itemRows].filter((r) => r.status !== "not_present");
 
   const isMatch = (r) => r.status === "match";
   const isMismatch = (r) => r.status === "mismatch";
-  const isMissing = (r) => r.status === "missing_in_system" || r.status === "missing_in_checklist";
+  const isMissing = (r) => r.status === "missing_in_system" || r.status === "missing_in_checklist" || r.status === "extra_in_system";
 
   const matchedRows = comparable.filter(isMatch);
   const mismatchedRows = comparable.filter(isMismatch);
@@ -302,6 +369,7 @@ function normalizeResult(parsed) {
     items,
     containers,
     certificates,
+    issuedRetroactively,
     sims,
     dutyTax,
     matchedFields,
@@ -339,7 +407,14 @@ function mockResult(checklistName, systemNames) {
     certificates: [
       { field: "Certificate Number", checklistValue: "COO-99812", systemValue: "COO-99812", status: "match", sourceDocument: "Certificate", detail: "" },
     ],
-    sims: [{ field: "SIMS Number", checklistValue: null, systemValue: null, status: "not_present", sourceDocument: "", detail: "SIMS not applicable / not present." }],
+    issuedRetroactively: { present: true, marked: false, sourceDocument: "CEPA TJD-4350", detail: "Field present on the CEPA certificate; checkbox not marked." },
+    sims: {
+      records: [
+        { simsNumber: "2025SIMS0001", simsDate: "12/06/2025", status: "match", sourceDocument: src, detail: "" },
+        { simsNumber: "2025SIMS0002", simsDate: "15/06/2025", status: "mismatch", sourceDocument: src, detail: "SIMS Date does not match the uploaded document (15/06/2025 vs 18/06/2025)." },
+        { simsNumber: "2025SIMS0003", simsDate: "20/06/2025", status: "missing_in_system", sourceDocument: "", detail: "In the checklist but not found in any SIMS document." },
+      ],
+    },
     dutyTax: [
       { name: "Basic Customs Duty", amount: "1,25,000", percentage: "10", present: true, matches: null, detail: "" },
       { name: "Social Welfare Surcharge", amount: "12,500", percentage: "10", present: true, matches: null, detail: "" },
@@ -411,7 +486,7 @@ const resultCache = new Map(); // key -> { result, at }
 function cacheKey(checklist, systemDocs) {
   const h = crypto.createHash("sha256");
   h.update(geminiConfig.model);
-  h.update("v2"); // bump when the prompt/output shape changes
+  h.update("v3"); // bump when the prompt/output shape changes
   h.update(String(checklist.originalname || ""));
   h.update(checklist.buffer);
   for (const d of systemDocs) {
