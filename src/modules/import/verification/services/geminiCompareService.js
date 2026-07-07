@@ -56,7 +56,7 @@ Each comparison row has a "status" that is one of:
 
 Compare and report the following.
 
-A) HEADER FIELDS — compare each of: Invoice Value, Invoice Date, Invoice Number, SVB Reference,
+A) HEADER FIELDS — compare each of: Invoice Value, Invoice Date, Invoice Number,
    IGM Number, Port of Origin, Port of Shipment, Country of Origin, Country of Consignment,
    MBL/MAWB Number, HBL/HAWB Number, MAWB/HAWB Date, Bill of Entry Date, Number of Packages,
    BDL/BL Gross Weight, Marks & Numbers, Shipper Details, Consignee Details.
@@ -67,9 +67,13 @@ B) ITEM DETAILS — HIGHEST PRIORITY. Do an item-by-item comparison between the 
    "missingItems" (in the checklist but not in the system docs) and "extraItems" (in the system
    docs but not in the checklist). Flag quantity, HSN, value and description mismatches.
 
-C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number.
+C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number. List each of
+   these AT MOST ONCE — never output duplicate rows for the same field.
 
-D) CERTIFICATES — Certificate Type, Certificate Number and any other certificate references.
+D) CERTIFICATES — Certificate Number and any other certificate references. Do NOT include a
+   "Certificate Type" field.
+
+Do NOT extract, compare or output "SVB Reference" or "Certificate Type" anywhere in the result.
 
 E) SIMS — SIMS Number and SIMS details (use status "not_present" if neither document has it).
 
@@ -181,11 +185,30 @@ function normDutyTax(arr) {
     }));
 }
 
+// Fields explicitly removed from the verification report.
+const DROP_FIELD_RE = /^\s*(svb\s*ref(erence)?|certificate\s*type)\s*$/i;
+const keepField = (r) => r && !DROP_FIELD_RE.test(String(r.field || ""));
+
+// Remove duplicate rows that repeat the same field (e.g. Container Number/Size/Type/
+// Seal appearing twice). Keeps the first — preferring a populated/"match" row.
+function dedupeByField(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    const key = String(r.field || "").trim().toLowerCase();
+    const existing = byKey.get(key);
+    if (!existing) { byKey.set(key, r); continue; }
+    const richer = (x) => (x.checklistValue != null ? 1 : 0) + (x.systemValue != null ? 1 : 0) + (x.status === "match" ? 1 : 0);
+    if (richer(r) > richer(existing)) byKey.set(key, r);
+  }
+  return [...byKey.values()];
+}
+const cleanRows = (arr) => dedupeByField(normRows(arr).filter(keepField));
+
 function normalizeResult(parsed) {
-  const header = normRows(parsed.header);
-  const containers = normRows(parsed.containers);
-  const certificates = normRows(parsed.certificates);
-  const sims = normRows(parsed.sims);
+  const header = cleanRows(parsed.header);
+  const containers = cleanRows(parsed.containers);
+  const certificates = cleanRows(parsed.certificates);
+  const sims = cleanRows(parsed.sims);
   const itemsRaw = parsed.items || {};
   const items = {
     rows: Array.isArray(itemsRaw.rows) ? itemsRaw.rows.filter(Boolean).map(normItemRow) : [],
