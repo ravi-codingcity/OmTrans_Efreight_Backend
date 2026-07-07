@@ -2,6 +2,10 @@ const { validateVerificationPayload } = require("../validation/verificationValid
 const { compareChecklist, describeAiError } = require("../services/geminiCompareService");
 const { createJob, getJob, completeJob, failJob } = require("../services/jobStore");
 const { geminiConfig } = require("../config/geminiConfig");
+const VerificationRecord = require("../models/VerificationRecord");
+const { isSuperAdmin } = require("../../middleware/importAuth");
+
+const str = (v) => (v == null ? "" : String(v).trim());
 
 /* ------------------------------------------------------------------ */
 /*  AI Document Verification controller (async job pattern)           */
@@ -81,4 +85,82 @@ const getStatus = (_req, res) => {
   });
 };
 
-module.exports = { startComparison, getComparisonStatus, getStatus };
+/* -------------------------- saved records -------------------------- */
+
+// Only the owner (or a Super Admin) may access a given record.
+const canAccess = (req, record) =>
+  isSuperAdmin(req) || (record.ownerId && String(record.ownerId) === String((req.importUser || {})._id));
+
+// POST /records — persist a completed verification report.
+const saveRecord = async (req, res) => {
+  try {
+    const { result, checklistFileName, systemDocuments } = req.body || {};
+    if (!result || typeof result !== "object" || !result.dashboard) {
+      return res.status(400).json({ success: false, message: "Missing or invalid verification result to save." });
+    }
+    const u = req.importUser || {};
+    const d = result.dashboard || {};
+    const meta = result.meta || {};
+    const record = await VerificationRecord.create({
+      checklistFileName: str(checklistFileName) || str(meta.checklist) || "CHA Checklist",
+      systemDocuments: Array.isArray(systemDocuments) && systemDocuments.length
+        ? systemDocuments.map(String)
+        : (Array.isArray(meta.systemDocuments) ? meta.systemDocuments.map(String) : []),
+      result,
+      verificationStatus: result.match ? "match" : "mismatch",
+      matchPercentage: Number(d.matchPercentage) || 0,
+      matchedCount: Number(d.totalMatched) || 0,
+      unmatchedCount: Number(d.totalUnmatched) || 0,
+      missingCount: Number(d.totalMissing) || 0,
+      ownerId: u._id,
+      createdBy: str(u.fullName) || str(u.username),
+      createdByRole: str(u.role),
+      createdByLocation: str(u.location),
+    });
+    log("info", `record ${record._id} saved`, { by: record.createdBy, status: record.verificationStatus });
+    return res.status(201).json({ success: true, message: "Verification record saved.", data: { id: record._id } });
+  } catch (error) {
+    log("error", `saveRecord error: ${error && error.message}`);
+    return res.status(500).json({ success: false, message: error.message || "Failed to save record." });
+  }
+};
+
+// GET /records — list records (own records; Super Admin sees all). Excludes the
+// heavy result payload for a fast, light list.
+const listRecords = async (req, res) => {
+  try {
+    const filter = isSuperAdmin(req) ? {} : { ownerId: (req.importUser || {})._id };
+    const records = await VerificationRecord.find(filter)
+      .sort({ createdAt: -1 })
+      .select("-result")
+      .lean();
+    return res.json({ success: true, data: records });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// GET /records/:id — full saved report (owner or Super Admin only).
+const getRecord = async (req, res) => {
+  try {
+    const record = await VerificationRecord.findById(req.params.id).lean();
+    if (!record) return res.status(404).json({ success: false, message: "Verification record not found." });
+    if (!canAccess(req, record)) return res.status(403).json({ success: false, message: "Not authorized to view this record." });
+    return res.json({ success: true, data: record });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// DELETE /records/:id — Super Admin only (enforced by route middleware too).
+const deleteRecord = async (req, res) => {
+  try {
+    const record = await VerificationRecord.findByIdAndDelete(req.params.id);
+    if (!record) return res.status(404).json({ success: false, message: "Verification record not found." });
+    return res.json({ success: true, message: "Verification record deleted." });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { startComparison, getComparisonStatus, getStatus, saveRecord, listRecords, getRecord, deleteRecord };

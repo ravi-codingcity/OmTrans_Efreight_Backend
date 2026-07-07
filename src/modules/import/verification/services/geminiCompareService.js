@@ -103,17 +103,25 @@ D) CERTIFICATES — Certificate Number and any other certificate references. Do 
 
 Do NOT extract, compare or output "SVB Reference" or "Certificate Type" anywhere in the result.
 
-E) SIMS — MULTI-RECORD. The CHA Checklist may list MULTIPLE SIMS Number + SIMS Date entries, and
-   the uploaded SIMS document(s) contain corresponding entries. Extract EVERY SIMS Number and its
-   SIMS Date from BOTH sides. MATCH records by SIMS Number (normalise: digits/letters only, ignore
-   spaces/dots/case), then compare their SIMS Dates (normalise date format). For each record set
-   "status":
+E) SIMS — MULTI-RECORD. The CHA Checklist may list a SINGLE or MULTIPLE SIMS Number + SIMS Date
+   entries, and the uploaded SIMS document(s) contain corresponding entries.
+   CRITICAL — read the ENTIRE CHA Checklist carefully before concluding SIMS is absent. SIMS data
+   is often present but easy to miss: scan tables, annexures, remarks/notes, item-level rows and
+   footnotes. The label varies — accept ANY of: "SIMS", "SIMS No", "SIMS Number", "SIMS Reg No",
+   "SIMS Registration No", "Steel Import Monitoring System", "Registration No" (in a SIMS context),
+   and a date labelled "SIMS Date"/"Reg Date"/"Registration Date". A SIMS Number is typically a
+   long numeric/alphanumeric registration id. Do NOT report SIMS as missing from the checklist
+   when such a value is actually present — only mark "missing_in_system" when the number IS in the
+   checklist but genuinely NOT in any SIMS document.
+   Extract EVERY SIMS Number and its SIMS Date from BOTH sides. MATCH records by SIMS Number
+   (normalise: digits/letters only, ignore spaces/dots/case), then compare their SIMS Dates
+   (normalise date format). For each record set "status":
      - "match"             : SIMS Number found on both sides AND dates equal,
      - "mismatch"          : SIMS Number found on both sides but the dates differ,
      - "missing_in_system" : in the checklist but NOT in any SIMS document,
      - "extra_in_system"   : in a SIMS document but NOT in the checklist.
-   Give one record per distinct SIMS Number. If neither side has any SIMS data, return an empty
-   "records" array.
+   Give one record per distinct SIMS Number. If neither side has ANY SIMS data at all, return an
+   empty "records" array.
 
 F) DUTY & TAX — determine whether the CHA Checklist contains: Duty (Basic Customs Duty),
    Social Welfare Surcharge, IGST. For each charge found, capture name, amount, percentage, and
@@ -486,7 +494,7 @@ const resultCache = new Map(); // key -> { result, at }
 function cacheKey(checklist, systemDocs) {
   const h = crypto.createHash("sha256");
   h.update(geminiConfig.model);
-  h.update("v3"); // bump when the prompt/output shape changes
+  h.update("v4"); // bump when the prompt/output shape changes
   h.update(String(checklist.originalname || ""));
   h.update(checklist.buffer);
   for (const d of systemDocs) {
