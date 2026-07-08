@@ -75,19 +75,48 @@ A) HEADER FIELDS — compare each of: Invoice Value, Invoice Date, Invoice Numbe
    MBL/MAWB Number, HBL/HAWB Number, MAWB/HAWB Date, Bill of Entry Date, Number of Packages,
    BDL/BL Gross Weight, Marks & Numbers, Shipper Details, Consignee Details.
 
-B) ITEM DETAILS — HIGHEST PRIORITY. Item-by-item comparison between the checklist and the
-   Commercial/Shipping Invoice (and packing list). MATCH items across the documents by BEST FIT
-   (primarily by HSN code, then by description similarity) — do NOT rely on row order, which
-   often differs. For each matched item capture: description, hsnCode, quantity, unit, unitPrice,
-   totalValue, countryOfOrigin, a status and detail. Apply the DETERMINISTIC NORMALISATION rules
-   above to every value:
-   - status = "match" when the item's description, HSN, quantity, unit price and total value are
-     all equal after normalisation. Set status = "mismatch" ONLY when a value genuinely differs,
-     and in "detail" name exactly which field(s) differ and the two values.
+B) ITEM DETAILS — HIGHEST PRIORITY, and the MOST CRITICAL part of this verification.
+   Item-by-item comparison between the checklist and the Commercial/Shipping Invoice (and
+   packing list). MATCH items across the documents by BEST FIT (primarily by HSN code, then by
+   description similarity) — do NOT rely on row order, which often differs. For each matched item
+   capture: description, hsnCode, quantity, unit, unitPrice, totalValue, countryOfOrigin, a status
+   and detail, PLUS the dedicated description comparison described below.
+
+   DESCRIPTION COMPARISON — "Description of Goods", "Description of Unit" and "Item Description"
+   all mean the SAME thing; compare them as equivalent. Here you MUST prioritise ACCURACY over
+   leniency: the general "when in doubt, treat as match" rule DOES NOT apply to item descriptions.
+   * Compare the COMPLETE product description, not just partial text.
+   * IGNORE ONLY these insignificant formatting differences: UPPERCASE vs lowercase, extra or
+     missing spaces, line breaks, minor punctuation differences, and formatting/OCR artifacts.
+   * DETECT and report as a MISMATCH any difference in a meaningful product specification or
+     technical value embedded in the description, including but not limited to: model / part /
+     type numbers, ratings, BREAKING CAPACITY (e.g. 10 KA vs 18 KA), current (A), voltage (V),
+     poles / phases, frequency (Hz), power (W / kW / HP), grade or material, size / dimensions,
+     and any embedded quantity. If ANY such value differs, the description is NOT a match — even
+     when the two items are obviously the same product family or model.
+   * Set "descriptionStatus" = "match" ONLY when the two descriptions are truly equivalent after
+     ignoring the formatting differences listed above; otherwise "mismatch".
+   * In "descriptionDetail" name the exact specification(s) that differ and quote BOTH values
+     (e.g. "Breaking capacity differs: 10 KA (checklist) vs 18 KA (system)"). Leave "" when they
+     match.
+   * ALWAYS fill "checklistDescription" with the checklist's exact wording and "systemDescription"
+     with the system document's exact wording (so the two can be shown side by side).
+
+   WORKED EXAMPLE — these two descriptions MUST be reported as descriptionStatus = "mismatch":
+     checklist: "MOULDED CASE CIRCUIT BREAKER # AM1-200L/3P 110 WITH AUXILIARY BLOCK 10 KA. AT 240V (FOR INDUSTRIAL USE ONLY)"
+     system:    "Moulded Case Circuit Breaker AM1-200L/3P 110A With Auxiliary Block 18 ka. at 240V FOR INDUSTRIAL USE ONLY"
+     Reason: the breaking capacity differs (10 KA vs 18 KA) — a critical product specification —
+     so despite near-identical wording this is a MISMATCH, not a match.
+
+   ITEM STATUS:
+   - status = "match" ONLY when descriptionStatus = "match" AND hsnCode, quantity, unit price and
+     total value are all equal after the deterministic normalisation above. Set status =
+     "mismatch" when descriptionStatus = "mismatch" OR any other value genuinely differs, and in
+     "detail" name exactly which field(s) differ and the two values.
    - "missingItems": items in the checklist with no corresponding item in the system docs.
    - "extraItems": items in the system docs with no corresponding item in the checklist.
-   Be conservative: if an item clearly corresponds and its values normalise to the same thing,
-   report "match" — do not invent mismatches.
+   Be conservative about the NUMERIC fields (quantity/price/value): if they normalise to the same
+   number, treat them as equal. But NEVER relax the description-specification rule above.
 
 C) CONTAINERS — Container Number, Container Size, Container Type, Seal Number. List each of
    these AT MOST ONCE — never output duplicate rows for the same field.
@@ -136,7 +165,9 @@ status, sourceDocument, detail}); use null for absent values, never invent data:
   "summary": string,
   "header": [ row ],
   "items": {
-    "rows": [ { "description": string, "hsnCode": string|null, "quantity": string|null,
+    "rows": [ { "description": string, "checklistDescription": string|null,
+                "systemDescription": string|null, "descriptionStatus": "match"|"mismatch",
+                "descriptionDetail": string, "hsnCode": string|null, "quantity": string|null,
                 "unit": string|null, "unitPrice": string|null, "totalValue": string|null,
                 "countryOfOrigin": string|null, "status": string, "sourceDocument": string|null,
                 "detail": string } ],
@@ -205,10 +236,86 @@ function normRow(r, defaultField) {
 }
 const normRows = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).map((r) => normRow(r)) : []);
 
+/* --------------- item description specification comparison --------------- */
+// A "specification" token is a number immediately followed by a known unit, e.g.
+// "10 KA", "240V", "200L", "3P". Model / part numbers naturally decompose into such
+// tokens too (e.g. AM1-200L/3P), so identical models compare equal while a changed
+// rating shows up as a differing magnitude for the same unit.
+const SPEC_UNIT_RE = /(\d+(?:\.\d+)?)\s*(KA|KVA|MVA|KV|MV|VA|KW|MW|HP|HZ|KG|MT|MM|CM|ML|POLE|PH|PCS|NOS|A|V|W|T|G|L|M|P)\b/gi;
+
+function specMap(text) {
+  const map = new Map(); // UNIT -> Set of magnitudes
+  const s = String(text || "").toUpperCase();
+  SPEC_UNIT_RE.lastIndex = 0;
+  let m;
+  while ((m = SPEC_UNIT_RE.exec(s))) {
+    const mag = parseFloat(m[1]);
+    if (Number.isNaN(mag)) continue;
+    const unit = m[2].toUpperCase();
+    if (!map.has(unit)) map.set(unit, new Set());
+    map.get(unit).add(mag);
+  }
+  return map;
+}
+
+// Deterministic, formatting-insensitive check for meaningful specification changes in
+// an item description. Reports ONLY same-unit / different-value differences (e.g.
+// breaking capacity 10 KA vs 18 KA) — a unit present on only one side is treated as a
+// formatting difference and ignored, so this never produces false positives on wording
+// or OCR noise. Returns an array of human-readable difference strings ([] = none).
+function describeSpecDiffs(a, b) {
+  const ma = specMap(a);
+  const mb = specMap(b);
+  const diffs = [];
+  for (const [unit, av] of ma) {
+    if (!mb.has(unit)) continue;
+    const aArr = [...av].sort((x, y) => x - y);
+    const bArr = [...mb.get(unit)].sort((x, y) => x - y);
+    if (aArr.length !== bArr.length || aArr.some((x, i) => x !== bArr[i])) {
+      diffs.push(`${unit} ${aArr.join("/")} (checklist) vs ${bArr.join("/")} (system)`);
+    }
+  }
+  return diffs;
+}
+
 function normItemRow(r) {
-  const status = ROW_STATUS.includes(r && r.status) ? r.status : "mismatch";
+  let status = ROW_STATUS.includes(r && r.status) ? r.status : "mismatch";
+  const checklistDescription = str(r && r.checklistDescription);
+  const systemDescription = str(r && r.systemDescription);
+  const description = (strOr(r && r.description, "") || checklistDescription || systemDescription || "—") || "—";
+
+  // Description verdict from the AI, defaulting to the row's overall verdict.
+  let descriptionStatus = r && (r.descriptionStatus === "match" || r.descriptionStatus === "mismatch")
+    ? r.descriptionStatus
+    : status === "match" ? "match" : "mismatch";
+  let descriptionDetail = strOr(r && r.descriptionDetail, "");
+
+  // Deterministic safety net: a same-unit / different-value technical specification in
+  // the description (e.g. breaking capacity 10 KA vs 18 KA) is ALWAYS a mismatch, no
+  // matter how similar the wording. This only tightens the verdict — never loosens it.
+  if (checklistDescription && systemDescription) {
+    const diffs = describeSpecDiffs(checklistDescription, systemDescription);
+    if (diffs.length) {
+      descriptionStatus = "mismatch";
+      // Keep the AI's human-readable reason when it gave one; otherwise state the
+      // specification difference the deterministic check found.
+      if (!descriptionDetail) descriptionDetail = `Specification difference — ${diffs.join("; ")}.`;
+    }
+  }
+
+  // A description mismatch makes the whole item a mismatch.
+  let detail = strOr(r && r.detail, "");
+  if (descriptionStatus === "mismatch") {
+    if (status === "match") status = "mismatch";
+    if (descriptionDetail && !detail.includes(descriptionDetail)) detail = detail ? `${detail} ${descriptionDetail}` : descriptionDetail;
+  }
+
   return {
-    description: strOr(r && r.description, "—") || "—",
+    description,
+    checklistDescription,
+    systemDescription,
+    descriptionStatus,
+    descriptionDetail,
     hsnCode: str(r && r.hsnCode),
     quantity: str(r && r.quantity),
     unit: str(r && r.unit),
@@ -217,7 +324,7 @@ function normItemRow(r) {
     countryOfOrigin: str(r && r.countryOfOrigin),
     status,
     sourceDocument: strOr(r && r.sourceDocument, ""),
-    detail: strOr(r && r.detail, ""),
+    detail,
   };
 }
 
@@ -402,8 +509,8 @@ function mockResult(checklistName, systemNames) {
     ],
     items: {
       rows: [
-        { description: "COTTON T-SHIRTS", hsnCode: "6109", quantity: "1000", unit: "PCS", unitPrice: "5.00", totalValue: "5000", countryOfOrigin: "IN", status: "match", sourceDocument: src, detail: "" },
-        { description: "COTTON TROUSERS", hsnCode: "6203", quantity: "500", unit: "PCS", unitPrice: "8.00", totalValue: "4000", countryOfOrigin: "IN", status: "mismatch", sourceDocument: src, detail: "Quantity differs (500 vs 450)." },
+        { description: "COTTON T-SHIRTS", checklistDescription: "COTTON T-SHIRTS 100% COMBED", systemDescription: "cotton t-shirts 100% combed", descriptionStatus: "match", descriptionDetail: "", hsnCode: "6109", quantity: "1000", unit: "PCS", unitPrice: "5.00", totalValue: "5000", countryOfOrigin: "IN", status: "match", sourceDocument: src, detail: "" },
+        { description: "MOULDED CASE CIRCUIT BREAKER # AM1-200L/3P 110 WITH AUXILIARY BLOCK 10 KA. AT 240V (FOR INDUSTRIAL USE ONLY)", checklistDescription: "MOULDED CASE CIRCUIT BREAKER # AM1-200L/3P 110 WITH AUXILIARY BLOCK 10 KA. AT 240V (FOR INDUSTRIAL USE ONLY)", systemDescription: "Moulded Case Circuit Breaker AM1-200L/3P 110A With Auxiliary Block 18 ka. at 240V FOR INDUSTRIAL USE ONLY", descriptionStatus: "mismatch", descriptionDetail: "Breaking capacity differs: 10 KA (checklist) vs 18 KA (system).", hsnCode: "8536", quantity: "50", unit: "PCS", unitPrice: "40.00", totalValue: "2000", countryOfOrigin: "CN", status: "match", sourceDocument: src, detail: "" },
       ],
       missingItems: ["LEATHER BELTS"],
       extraItems: [],
@@ -494,7 +601,7 @@ const resultCache = new Map(); // key -> { result, at }
 function cacheKey(checklist, systemDocs) {
   const h = crypto.createHash("sha256");
   h.update(geminiConfig.model);
-  h.update("v4"); // bump when the prompt/output shape changes
+  h.update("v5"); // bump when the prompt/output shape changes
   h.update(String(checklist.originalname || ""));
   h.update(checklist.buffer);
   for (const d of systemDocs) {
