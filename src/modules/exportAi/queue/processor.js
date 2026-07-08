@@ -8,6 +8,7 @@ const { logger } = require("../config/logger");
 const { extractDocument, describeAiError, verifyGemini } = require("../services/gemini.service");
 const { reconcileDocuments, isLeoDocument } = require("../services/comparison.service");
 const { buildShipmentReportData } = require("../services/shipmentReport.service");
+const { buildMblFromHbl } = require("../services/mbl.service");
 const { buildAnalysis } = require("../services/analysis.service");
 const { detectDocTypeFromName } = require("../utils/docType");
 const { safeRmDir } = require("../utils/files");
@@ -243,6 +244,13 @@ async function processJob({ jobId, batchDir }) {
       });
       const N = leoDocs.length;
 
+      // HBL stays per-LEO, but the MBL is ONE consolidated document for the whole
+      // shipment: build a consolidated HBL from EVERY LEO + shared docs, then derive
+      // the MBL from it. This same consolidated MBL is attached to every job in the
+      // session, so generating the MBL from any shipment yields the combined MBL.
+      const consolidatedHbl = buildShipment(extracted, "", { consolidated: true }).srData;
+      const consolidatedMbl = { data: buildMblFromHbl(consolidatedHbl), generated: false };
+
       // Create shipments 2..N FIRST, so they all exist before shipment 1 (the parent
       // job) is marked completed — the Dashboard then shows the full session at once.
       for (let i = 1; i < N; i += 1) {
@@ -264,6 +272,7 @@ async function processJob({ jobId, batchDir }) {
           consolidated,
           analysis,
           shipmentReport: { data: srData, aiData: srData, generated: false },
+          mbl: { data: JSON.parse(JSON.stringify(consolidatedMbl.data)), generated: false },
           status: JOB_STATUS.COMPLETED,
           progress: 100,
           statusMessage: `Shipment ${i + 1} of ${N} — review & generate`,
@@ -287,6 +296,7 @@ async function processJob({ jobId, batchDir }) {
       fresh.shipmentIndex = 1;
       Object.assign(fresh, leoMeta(leo0));
       fresh.shipmentReport = { data: first.srData, aiData: first.srData, generated: false };
+      fresh.mbl = { data: JSON.parse(JSON.stringify(consolidatedMbl.data)), generated: false };
       fresh.status = JOB_STATUS.COMPLETED;
       fresh.progress = 100;
       fresh.statusMessage = `Shipment 1 of ${N} — review & generate`;
