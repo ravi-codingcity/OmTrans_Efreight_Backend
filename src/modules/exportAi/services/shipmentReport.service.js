@@ -372,8 +372,9 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     applyOverride("Shipper / Exporter", combineParties("exporter_name", "exporter_address"));
     applyOverride("Consignee", combineParties("consignee_name", "consignee_address"));
     applyOverride("Notify Party", combineParties("notify_party", "notify_party_address"));
-    // Combine Marks & Numbers from every LEO (unique values only).
-    applyOverride("Marks & Numbers", collectUnique(sbDocs, "marks_and_numbers").join("\n"));
+    // NOTE: Marks & Numbers is intentionally NOT extracted in the consolidated
+    // (Multiple LEO → Single HBL) workflow — it stays blank for manual entry in the
+    // HBL / MBL / ISF documents.
   } else if (!options.multiLeo) {
     const siAddress = (nameKey, addrKey) => {
       let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
