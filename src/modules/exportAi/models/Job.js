@@ -89,6 +89,10 @@ const jobSchema = new mongoose.Schema(
       savedAt: Date,
     },
 
+    // Reference-only: which document each field of the consolidated MBL came from
+    // (Multiple LEO with Multiple HBL). Never written into a generated document.
+    mblDataSources: { type: mongoose.Schema.Types.Mixed },
+
     isf: {
       pdfPath: String,
       docxPath: String,

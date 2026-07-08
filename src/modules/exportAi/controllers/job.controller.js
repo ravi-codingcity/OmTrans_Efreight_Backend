@@ -262,7 +262,7 @@ const getMblData = asyncHandler(async (req, res) => {
     job.markModified("mbl");
     await job.save();
   }
-  res.json({ success: true, data: job.mbl.data, generated: Boolean(job.mbl.generated), pdfEngine: job.mbl.pdfEngine, jobNumber: job.jobNumber });
+  res.json({ success: true, data: job.mbl.data, generated: Boolean(job.mbl.generated), pdfEngine: job.mbl.pdfEngine, dataSources: job.mblDataSources || null, jobNumber: job.jobNumber });
 });
 
 /** Generate the final MBL Word + PDF from the (edited) MBL data. */

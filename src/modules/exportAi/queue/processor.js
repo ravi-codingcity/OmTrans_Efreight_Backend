@@ -8,7 +8,7 @@ const { logger } = require("../config/logger");
 const { extractDocument, describeAiError, verifyGemini } = require("../services/gemini.service");
 const { reconcileDocuments, isLeoDocument } = require("../services/comparison.service");
 const { buildShipmentReportData } = require("../services/shipmentReport.service");
-const { buildMblFromHbl } = require("../services/mbl.service");
+const { buildMblFromHbl, buildMblSourceSummary } = require("../services/mbl.service");
 const { buildAnalysis } = require("../services/analysis.service");
 const { detectDocTypeFromName } = require("../utils/docType");
 const { safeRmDir } = require("../utils/files");
@@ -250,6 +250,8 @@ async function processJob({ jobId, batchDir }) {
       // session, so generating the MBL from any shipment yields the combined MBL.
       const consolidatedHbl = buildShipment(extracted, "", { consolidated: true }).srData;
       const consolidatedMbl = { data: buildMblFromHbl(consolidatedHbl), generated: false };
+      // Reference-only summary: which uploaded document each MBL field came from.
+      const mblDataSources = buildMblSourceSummary(extracted, { location });
 
       // Create shipments 2..N FIRST, so they all exist before shipment 1 (the parent
       // job) is marked completed — the Dashboard then shows the full session at once.
@@ -273,6 +275,7 @@ async function processJob({ jobId, batchDir }) {
           analysis,
           shipmentReport: { data: srData, aiData: srData, generated: false },
           mbl: { data: JSON.parse(JSON.stringify(consolidatedMbl.data)), generated: false },
+          mblDataSources,
           status: JOB_STATUS.COMPLETED,
           progress: 100,
           statusMessage: `Shipment ${i + 1} of ${N} — review & generate`,
@@ -297,6 +300,7 @@ async function processJob({ jobId, batchDir }) {
       Object.assign(fresh, leoMeta(leo0));
       fresh.shipmentReport = { data: first.srData, aiData: first.srData, generated: false };
       fresh.mbl = { data: JSON.parse(JSON.stringify(consolidatedMbl.data)), generated: false };
+      fresh.mblDataSources = mblDataSources;
       fresh.status = JOB_STATUS.COMPLETED;
       fresh.progress = 100;
       fresh.statusMessage = `Shipment 1 of ${N} — review & generate`;
