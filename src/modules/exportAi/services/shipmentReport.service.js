@@ -61,6 +61,30 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   const orderedDocs = [...documents].sort((a, b) => docRank(a) - docRank(b));
   const pushUnique = (arr, v) => { if (!isEmpty(v) && !arr.some((x) => normKey(x) === normKey(v))) arr.push(String(v).trim()); };
 
+  // Consolidated helpers (Multiple LEO → Single HBL): collect every UNIQUE value of a
+  // field across the given docs, and sum numeric totals (e.g. packages / gross weight).
+  const collectUnique = (docs, key) => {
+    const out = [];
+    docs.forEach((d) => pushUnique(out, d.extractedFields && d.extractedFields[key]));
+    return out;
+  };
+  const sumWithUnit = (docs, key) => {
+    let total = 0, unit = "", any = false;
+    docs.forEach((d) => {
+      const raw = d.extractedFields && d.extractedFields[key];
+      if (isEmpty(raw)) return;
+      const m = String(raw).replace(/,/g, "").match(/([\d.]+)\s*([A-Za-z.]+)?/);
+      if (!m) return;
+      const n = parseFloat(m[1]);
+      if (Number.isNaN(n)) return;
+      total += n; any = true;
+      if (!unit && m[2]) unit = m[2];
+    });
+    if (!any) return "";
+    const numStr = Number.isInteger(total) ? String(total) : String(Math.round(total * 1000) / 1000);
+    return unit ? `${numStr} ${unit}` : numStr;
+  };
+
   // Container numbers: prefer the Shipping Instruction, then the Shipping Bill,
   // then any other document, then the consolidated field.
   const containersFromDocs = (docs) => {
@@ -108,6 +132,22 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     if (!isEmpty(c.weight) && !weightByContainer.has(k)) weightByContainer.set(k, String(c.weight).trim());
     if (!isEmpty(c.packages) && !packagesByContainer.has(k)) packagesByContainer.set(k, String(c.packages).trim());
   }));
+  // Consolidated mode: when a LEO reports its packages/weight at the shipment level and
+  // has exactly ONE container, attribute those totals to that container so each LEO's
+  // row shows its own quantity & gross weight in the combined HBL.
+  if (options.consolidated) {
+    sbDocs.forEach((d) => {
+      const rawCnos = ((d.rawExtraction && d.rawExtraction.containers) || []).map((c) => c.containerNo).filter((x) => !isEmpty(x));
+      const efCno = d.extractedFields && d.extractedFields.container_number;
+      const cnos = rawCnos.length ? rawCnos : (isEmpty(efCno) ? [] : [efCno]);
+      if (cnos.length !== 1) return;
+      const k = normKey(cnos[0]);
+      const pkg = d.extractedFields && d.extractedFields.number_of_packages;
+      const wt = d.extractedFields && d.extractedFields.total_gross_weight;
+      if (!isEmpty(pkg) && !packagesByContainer.has(k)) packagesByContainer.set(k, String(pkg).trim());
+      if (!isEmpty(wt) && !weightByContainer.has(k)) weightByContainer.set(k, String(wt).trim());
+    });
+  }
 
   const sealPool = [];
   sealDocs.forEach((d) => {
@@ -178,11 +218,18 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   else if (!isEmpty(sbCount)) containerTypeCount = `${sbCount} Container(s)`;
 
   const sbField = (key) => firstVal(sbDocs, key) || (isEmpty(fields[key]) ? "" : String(fields[key]));
-  const invNo = sbField("invoice_number");
-  const invDate = sbField("invoice_date");
-  const sbNo = sbField("shipping_bill_number");
-  const sbDate = sbField("shipping_bill_date");
-  const iec = sbField("iec_number");
+  // In consolidated (Multiple LEO → Single HBL) mode, include EVERY unique value from
+  // all LEOs (e.g. both invoices, both shipping bills); otherwise use the first value.
+  const sbPick = (key) => {
+    if (!options.consolidated) return sbField(key);
+    const u = collectUnique(sbDocs, key);
+    return u.length ? u.join(", ") : sbField(key);
+  };
+  const invNo = sbPick("invoice_number");
+  const invDate = sbPick("invoice_date");
+  const sbNo = sbPick("shipping_bill_number");
+  const sbDate = sbPick("shipping_bill_date");
+  const iec = sbPick("iec_number");
 
   const BLANK_LINE = "______________________";
   const descLines = [];
@@ -215,8 +262,12 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     { header: "Description of Goods", key: "description" },
     { header: "Gross Weight (G. WT)", key: "grossWeight" },
   ];
-  const qty = firstVal(sbDocs, "number_of_packages") || (isEmpty(fields.number_of_packages) ? "" : String(fields.number_of_packages));
-  const gw = firstVal(sbDocs, "total_gross_weight") || (isEmpty(fields.total_gross_weight) ? "" : String(fields.total_gross_weight));
+  // Consolidated mode: the total quantity / gross weight is the SUM across all LEOs
+  // (each container still shows its own value below). Otherwise use the first value.
+  const qty = (options.consolidated && sumWithUnit(sbDocs, "number_of_packages"))
+    || firstVal(sbDocs, "number_of_packages") || (isEmpty(fields.number_of_packages) ? "" : String(fields.number_of_packages));
+  const gw = (options.consolidated && sumWithUnit(sbDocs, "total_gross_weight"))
+    || firstVal(sbDocs, "total_gross_weight") || (isEmpty(fields.total_gross_weight) ? "" : String(fields.total_gross_weight));
 
   const realContainers = containers.filter((c) => !isEmpty(c.containerNo));
   const isMulti = realContainers.length > 1;
@@ -321,6 +372,8 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     applyOverride("Shipper / Exporter", combineParties("exporter_name", "exporter_address"));
     applyOverride("Consignee", combineParties("consignee_name", "consignee_address"));
     applyOverride("Notify Party", combineParties("notify_party", "notify_party_address"));
+    // Combine Marks & Numbers from every LEO (unique values only).
+    applyOverride("Marks & Numbers", collectUnique(sbDocs, "marks_and_numbers").join("\n"));
   } else if (!options.multiLeo) {
     const siAddress = (nameKey, addrKey) => {
       let parts = [firstVal(siDocs, nameKey), firstVal(siDocs, addrKey)].filter((x) => !isEmpty(x)).map(String);
