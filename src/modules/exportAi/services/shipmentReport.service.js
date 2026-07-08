@@ -149,20 +149,21 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     if (!isEmpty(c.weight) && !weightByContainer.has(k)) weightByContainer.set(k, String(c.weight).trim());
     if (!isEmpty(c.packages) && !packagesByContainer.has(k)) packagesByContainer.set(k, String(c.packages).trim());
   }));
-  // Consolidated mode: when a LEO reports its packages/weight at the shipment level and
-  // has exactly ONE container, attribute those totals to that container so each LEO's
-  // row shows its own quantity & gross weight in the combined HBL.
+  // Consolidated mode: attribute EACH LEO's own shipment-level Quantity (PKG) and
+  // Gross Weight to its container so every LEO shows its individual values in the
+  // combined cargo table. The container is the LEO's OWN valid container number when
+  // present; otherwise the resolved container at the same position (containerNos[i]),
+  // which handles the case where the real container comes from CLP / Forwarding / Form
+  // 13 while the LEO only carried a CIN.
   if (options.consolidated) {
-    sbDocs.forEach((d) => {
-      const rawCnos = ((d.rawExtraction && d.rawExtraction.containers) || []).map((c) => c.containerNo).filter((x) => !isEmpty(x));
-      const efCno = d.extractedFields && d.extractedFields.container_number;
-      const cnos = rawCnos.length ? rawCnos : (isEmpty(efCno) ? [] : [efCno]);
-      if (cnos.length !== 1) return;
-      const k = normKey(cnos[0]);
-      const pkg = d.extractedFields && d.extractedFields.number_of_packages;
-      const wt = d.extractedFields && d.extractedFields.total_gross_weight;
-      if (!isEmpty(pkg) && !packagesByContainer.has(k)) packagesByContainer.set(k, String(pkg).trim());
-      if (!isEmpty(wt) && !weightByContainer.has(k)) weightByContainer.set(k, String(wt).trim());
+    sbDocs.forEach((d, i) => {
+      const ef = d.extractedFields || {};
+      const ownValid = [...(((d.rawExtraction && d.rawExtraction.containers) || []).map((c) => c.containerNo)), ef.container_number].filter(isContainerNo);
+      const target = ownValid.length === 1 ? ownValid[0] : (ownValid.length === 0 ? containerNos[i] : null);
+      if (isEmpty(target)) return;
+      const k = normKey(target);
+      if (!isEmpty(ef.number_of_packages) && !packagesByContainer.has(k)) packagesByContainer.set(k, String(ef.number_of_packages).trim());
+      if (!isEmpty(ef.total_gross_weight) && !weightByContainer.has(k)) weightByContainer.set(k, String(ef.total_gross_weight).trim());
     });
   }
 

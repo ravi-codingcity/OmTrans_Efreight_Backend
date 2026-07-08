@@ -28,91 +28,117 @@ function buildMblSourceSummary(documents = [], options = {}) {
   const clpDocs = documents.filter((d) => d.detectedType === "clp" || /\bclp\b|container\s*load\s*plan/i.test(name(d)));
   const sealDocs = isMumbai ? [...egateDocs, ...fwdDocs, ...clpDocs] : [...fwdDocs, ...egateDocs, ...clpDocs];
 
-  const pushU = (arr, v) => { if (!isEmptyVal(v) && !arr.some((x) => normKeyVal(x) === normKeyVal(v))) arr.push(String(v).trim()); };
   const cleanSeal = (s) => String(s || "").replace(/^\s*(line\s*seal\s*no\.?|agent\s*seal\s*no\.?|carrier\s*seal\s*no\.?|customs?\s*seal\s*no\.?|cust\s*seal\s*no\.?|line\s*seal|agent\s*seal|customs?\s*seal|seal\s*no\.?|seal)\s*[:.#-]*\s*/i, "").trim();
-
-  const fromField = (docs, key) => {
-    const vals = []; const src = [];
-    docs.forEach((d) => { const v = d.extractedFields && d.extractedFields[key]; if (!isEmptyVal(v)) { pushU(vals, v); if (!src.includes(name(d))) src.push(name(d)); } });
-    return { value: vals.join(", "), sources: src };
-  };
-  const fromGoods = (docs) => {
-    const vals = []; const src = [];
-    docs.forEach((d) => ((d.rawExtraction && d.rawExtraction.lineItems) || []).forEach((li) => { if (!isEmptyVal(li.description)) { pushU(vals, li.description); if (!src.includes(name(d))) src.push(name(d)); } }));
-    if (!vals.length) docs.forEach((d) => { const v = d.extractedFields && d.extractedFields.description_of_goods; if (!isEmptyVal(v)) { pushU(vals, v); if (!src.includes(name(d))) src.push(name(d)); } });
-    return { value: vals.join(" | "), sources: src };
-  };
-  const fromHsn = (docs) => {
-    const vals = []; const src = [];
-    docs.forEach((d) => {
-      ((d.rawExtraction && d.rawExtraction.hsCodes) || []).forEach((c) => { if (!isEmptyVal(c)) { pushU(vals, c); if (!src.includes(name(d))) src.push(name(d)); } });
-      const hc = d.extractedFields && d.extractedFields.hs_code; if (!isEmptyVal(hc)) { pushU(vals, hc); if (!src.includes(name(d))) src.push(name(d)); }
-    });
-    return { value: vals.join(", "), sources: src };
-  };
-  // Only a real Container Number (ISO 6346: 4 letters + 6-7 digits) qualifies — the
-  // CIN Number on the LEO must never be reported as the Container Number.
   const isContainerNoVal = (v) => /^[A-Z]{4}\d{6,7}$/.test(normKeyVal(v));
-  const fromContainers = (docs) => {
-    const vals = []; const src = [];
+
+  // Friendly, human-readable source label for each document (LEO 1, LEO 2, CLP, …)
+  // with the filename kept for traceability.
+  const leoLabel = new Map();
+  leoDocs.forEach((d, i) => leoLabel.set(d, `LEO ${i + 1}`));
+  const docType = (d) =>
+    leoLabel.get(d) ||
+    (bookingDocs.includes(d) ? "Booking Confirmation"
+      : siDocs.includes(d) ? "Shipping Instruction"
+      : clpDocs.includes(d) ? "CLP"
+      : fwdDocs.includes(d) ? "Forwarding Note"
+      : egateDocs.includes(d) ? "Form 13"
+      : "Document");
+  const srcName = (d) => { const t = docType(d); const f = name(d); return f && f !== t && f !== "document" ? `${t} (${f})` : t; };
+
+  // Every row is one (field × source document): field name, the value extracted from
+  // THAT document, the source document, and the field name as it appears there.
+  const rows = [];
+  const push = (field, value, source, sourceField) => { if (!isEmptyVal(value)) rows.push({ field, value: String(value).trim(), source, sourceField }); };
+
+  // Per-document field: emits one row for EACH document that carries the value (so
+  // both LEOs show up individually, e.g. Invoice Number → LEO 1, → LEO 2).
+  const perDoc = (field, docs, key, sourceField) =>
+    docs.forEach((d) => push(field, d.extractedFields && d.extractedFields[key], srcName(d), sourceField));
+
+  const perDocGoods = (docs) =>
     docs.forEach((d) => {
-      ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => { if (isContainerNoVal(c.containerNo)) { pushU(vals, c.containerNo); if (!src.includes(name(d))) src.push(name(d)); } });
-      const cf = d.extractedFields && d.extractedFields.container_number; if (isContainerNoVal(cf)) { pushU(vals, cf); if (!src.includes(name(d))) src.push(name(d)); }
+      const items = ((d.rawExtraction && d.rawExtraction.lineItems) || []).map((li) => li.description).filter((v) => !isEmptyVal(v));
+      const val = items.length ? items.join(", ") : (d.extractedFields && d.extractedFields.description_of_goods);
+      push("Description of Goods", val, srcName(d), "Description of Goods");
     });
-    return { value: vals.join(", "), sources: src };
-  };
-  // Container Number source resolution: LEO / Shipping Bill / EDI first, then fall
-  // back in order CLP → Forwarding Note → Form 13 (E-Gate) — never the CIN.
-  const resolveContainers = () => {
-    for (const grp of [leoDocs, clpDocs, fwdDocs, egateDocs, documents]) {
-      const r = fromContainers(grp);
-      if (r.value) return r;
-    }
-    return { value: "", sources: [] };
-  };
-  const fromSeals = (docs) => {
-    const vals = []; const src = [];
+  const perDocHsn = (docs) =>
     docs.forEach((d) => {
-      ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => [c.sealNo, c.linerSeal, c.agentSeal, c.customsSeal].forEach((s) => { if (!isEmptyVal(s)) { pushU(vals, cleanSeal(s)); if (!src.includes(name(d))) src.push(name(d)); } }));
-      ((d.rawExtraction && d.rawExtraction.seals) || []).forEach((s) => { if (!isEmptyVal(s)) { pushU(vals, cleanSeal(s)); if (!src.includes(name(d))) src.push(name(d)); } });
+      const codes = [];
+      ((d.rawExtraction && d.rawExtraction.hsCodes) || []).forEach((c) => { if (!isEmptyVal(c) && !codes.includes(String(c).trim())) codes.push(String(c).trim()); });
+      const hc = d.extractedFields && d.extractedFields.hs_code; if (!isEmptyVal(hc) && !codes.includes(String(hc).trim())) codes.push(String(hc).trim());
+      push("HSN Code", codes.join(", "), srcName(d), "HSN Code");
     });
-    return { value: vals.join(", "), sources: src };
+  const validContainersOf = (d) => {
+    const out = [];
+    ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => { if (isContainerNoVal(c.containerNo) && !out.some((x) => normKeyVal(x) === normKeyVal(c.containerNo))) out.push(String(c.containerNo).trim()); });
+    const cf = d.extractedFields && d.extractedFields.container_number; if (isContainerNoVal(cf) && !out.some((x) => normKeyVal(x) === normKeyVal(cf))) out.push(String(cf).trim());
+    return out;
+  };
+  const perDocSeals = (docs) =>
+    docs.forEach((d) => {
+      const seals = [];
+      ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => [c.sealNo, c.linerSeal, c.agentSeal, c.customsSeal].forEach((s) => { const v = cleanSeal(s); if (!isEmptyVal(v) && !seals.some((x) => normKeyVal(x) === normKeyVal(v))) seals.push(v); }));
+      ((d.rawExtraction && d.rawExtraction.seals) || []).forEach((s) => { const v = cleanSeal(s); if (!isEmptyVal(v) && !seals.some((x) => normKeyVal(x) === normKeyVal(v))) seals.push(v); });
+      push("Seal Number(s)", seals.join(", "), srcName(d), "Seal No.");
+    });
+
+  // Sum a shipment-level numeric field across all LEOs (for the Total rows).
+  const sumLeo = (key) => {
+    let total = 0, unit = "", any = false;
+    leoDocs.forEach((d) => {
+      const raw = d.extractedFields && d.extractedFields[key];
+      if (isEmptyVal(raw)) return;
+      const m = String(raw).replace(/,/g, "").match(/([\d.]+)\s*([A-Za-z.]+)?/);
+      if (!m) return; const n = parseFloat(m[1]); if (Number.isNaN(n)) return;
+      total += n; any = true; if (!unit && m[2]) unit = m[2];
+    });
+    if (!any) return "";
+    const numStr = Number.isInteger(total) ? String(total) : String(Math.round(total * 1000) / 1000);
+    return unit ? `${numStr} ${unit}` : numStr;
   };
 
-  const vessel = () => {
-    const a = fromField(bookingDocs, "vessel_name");
-    const parts = [a.value, fromField(bookingDocs, "voyage_number").value, fromField(bookingDocs, "vessel_flag").value].filter(Boolean);
-    return { value: parts.join(" / "), sources: a.sources };
-  };
+  // ---- Fixed / Booking-level fields (from the Booking Confirmation) ----
+  rows.push({ field: "Shipper / Exporter", value: "OmTrans Logistics Ltd", source: "MBL format (fixed)", sourceField: "—" });
+  perDoc("MBL Number (Booking No.)", bookingDocs, "booking_number", "Booking No.");
+  perDoc("Place of Receipt", bookingDocs, "place_of_receipt", "Place of Receipt");
+  perDoc("Port of Loading (POL)", bookingDocs, "port_of_loading", "Port of Loading");
+  perDoc("Port of Discharge (POD)", bookingDocs, "port_of_discharge", "Port of Discharge");
+  perDoc("Place of Delivery", bookingDocs, "place_of_delivery", "Place of Delivery");
+  bookingDocs.forEach((d) => {
+    const ef = d.extractedFields || {};
+    const parts = [ef.vessel_name, ef.voyage_number, ef.vessel_flag].filter((x) => !isEmptyVal(x)).map(String);
+    push("Vessel / Voyage / Flag", parts.join(" / "), srcName(d), "Vessel / Voyage / Flag");
+  });
+  perDoc("ETD", bookingDocs, "vessel_etd", "ETD");
+  perDoc("ETA", bookingDocs, "vessel_eta", "ETA");
 
-  const entries = [
-    { field: "Shipper / Exporter", res: { value: "OmTrans Logistics Ltd", sources: ["MBL format (fixed)"] } },
-    { field: "MBL Number (Booking No.)", res: fromField(bookingDocs, "booking_number") },
-    { field: "Place of Receipt", res: fromField(bookingDocs, "place_of_receipt") },
-    { field: "Port of Loading (POL)", res: fromField(bookingDocs, "port_of_loading") },
-    { field: "Port of Discharge (POD)", res: fromField(bookingDocs, "port_of_discharge") },
-    { field: "Place of Delivery", res: fromField(bookingDocs, "place_of_delivery") },
-    { field: "Vessel / Voyage / Flag", res: vessel() },
-    { field: "ETD", res: fromField(bookingDocs, "vessel_etd") },
-    { field: "ETA", res: fromField(bookingDocs, "vessel_eta") },
-    { field: "Invoice Number", res: fromField(leoDocs, "invoice_number") },
-    { field: "Invoice Date", res: fromField(leoDocs, "invoice_date") },
-    { field: "Shipping Bill Number", res: fromField(leoDocs, "shipping_bill_number") },
-    { field: "Shipping Bill Date", res: fromField(leoDocs, "shipping_bill_date") },
-    { field: "IEC / BR Number", res: fromField(leoDocs, "iec_number") },
-    { field: "Description of Goods", res: fromGoods(leoDocs.length ? leoDocs : documents) },
-    { field: "HSN Code", res: fromHsn(leoDocs.length ? leoDocs : documents) },
-    { field: "Quantity (PKG)", res: fromField(leoDocs, "number_of_packages") },
-    { field: "Gross Weight (G. WT)", res: fromField(leoDocs, "total_gross_weight") },
-    { field: "Container Number(s)", res: resolveContainers() },
-    { field: "Seal Number(s)", res: fromSeals(sealDocs.length ? sealDocs : leoDocs) },
-    { field: "Net WT", res: fromField(siDocs, "total_net_weight") },
-    { field: "Freight", res: fromField(siDocs, "freight") },
-  ];
+  // ---- Per-LEO shipment fields (one row per LEO / Shipping Bill / EDI) ----
+  perDoc("Invoice Number", leoDocs, "invoice_number", "Invoice No.");
+  perDoc("Invoice Date", leoDocs, "invoice_date", "Invoice Date");
+  perDoc("Shipping Bill Number", leoDocs, "shipping_bill_number", "Shipping Bill No.");
+  perDoc("Shipping Bill Date", leoDocs, "shipping_bill_date", "Shipping Bill Date");
+  perDoc("IEC / BR Number", leoDocs, "iec_number", "IEC / BR No.");
+  perDocGoods(leoDocs.length ? leoDocs : documents);
+  perDocHsn(leoDocs.length ? leoDocs : documents);
+  perDoc("Quantity (PKG)", leoDocs, "number_of_packages", "PKG");
+  perDoc("Gross Weight (G. WT)", leoDocs, "total_gross_weight", "G. WT");
 
-  return entries
-    .filter((e) => e.field === "Shipper / Exporter" || !isEmptyVal(e.res.value))
-    .map((e) => ({ field: e.field, value: e.res.value || "", sources: e.res.sources && e.res.sources.length ? e.res.sources : [] }));
+  // ---- Container Number: LEO first, else CLP → Forwarding Note → Form 13 ----
+  const containerGroup = [leoDocs, clpDocs, fwdDocs, egateDocs].find((g) => g.some((d) => validContainersOf(d).length)) || [];
+  containerGroup.forEach((d) => push("Container Number(s)", validContainersOf(d).join(", "), srcName(d), "Container No."));
+
+  // ---- Seals ----
+  perDocSeals(sealDocs.length ? sealDocs : leoDocs);
+
+  // ---- Shipping-Instruction-only fields ----
+  perDoc("Net WT", siDocs, "total_net_weight", "Net Weight");
+  perDoc("Freight", siDocs, "freight", "Freight");
+
+  // ---- Calculated totals (sum of every LEO) ----
+  push("Total Quantity (PKG)", sumLeo("number_of_packages"), "Calculated", "Σ of all LEO PKG");
+  push("Total Gross Weight (G. WT)", sumLeo("total_gross_weight"), "Calculated", "Σ of all LEO G. WT");
+
+  return rows;
 }
 
 const setSummary = (summary, label, value) => {
