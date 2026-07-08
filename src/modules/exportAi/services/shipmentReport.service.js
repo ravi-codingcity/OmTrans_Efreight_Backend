@@ -95,15 +95,32 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   };
   const siContainerNos = containersFromDocs(siDocs);
   const sbContainerNos = containersFromDocs(sbDocs);
+  // A real Container Number follows ISO 6346: 4 letters + 6-7 digits (e.g.
+  // MSCU1234567). This deliberately EXCLUDES the CIN Number (and other identifiers
+  // on the LEO) which must never be used as the Container Number.
+  const isContainerNo = (v) => /^[A-Z]{4}\d{6,7}$/.test(normKey(v));
+  const validContainersFrom = (docs) => containersFromDocs(docs).filter(isContainerNo);
   // In Multiple-LEO (split) and consolidated modes, container numbers come from the
   // LEO/Shipping Bill(s) — never the shared Shipping Instruction. Only the plain
   // single-LEO workflow prefers the SI's container list.
   const preferSiContainers = !options.multiLeo && !options.consolidated && siContainerNos.length;
-  let containerNos = preferSiContainers ? siContainerNos : sbContainerNos;
-  if (!containerNos.length) {
-    containerNos = [];
-    orderedDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(containerNos, c.containerNo)));
-    if (!containerNos.length && !isEmpty(fields.container_number)) pushUnique(containerNos, fields.container_number);
+  let containerNos;
+  if (options.consolidated) {
+    // Consolidated MBL (Multiple LEO): take the Container Number from the LEO /
+    // Shipping Bill / Indian Customs EDI first; if it is not available there, fall
+    // back in order CLP → Forwarding Note → Form 13. Never use the CIN Number.
+    containerNos = validContainersFrom(sbDocs);
+    if (!containerNos.length) containerNos = validContainersFrom(clpDocs);
+    if (!containerNos.length) containerNos = validContainersFrom(fwdDocs);
+    if (!containerNos.length) containerNos = validContainersFrom(egateDocs);
+    if (!containerNos.length) containerNos = validContainersFrom(orderedDocs);
+  } else {
+    containerNos = preferSiContainers ? siContainerNos : sbContainerNos;
+    if (!containerNos.length) {
+      containerNos = [];
+      orderedDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => pushUnique(containerNos, c.containerNo)));
+      if (!containerNos.length && !isEmpty(fields.container_number)) pushUnique(containerNos, fields.container_number);
+    }
   }
 
   const sealsByContainer = new Map();
@@ -286,7 +303,9 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
     .filter((e) => !isEmpty(e.containerSeal));
   if (!containerEntries.length) containerEntries.push({ containerSeal: "", quantity: qty, grossWeight: gw, cbm: "" });
 
-  const totals = isMulti ? { quantity: qty, grossWeight: gw } : null;
+  // Consolidated MBL always shows the Total Quantity (PKG) and Total Gross Weight
+  // (the sum across every LEO) beneath the individual shipment rows.
+  const totals = (isMulti || options.consolidated) ? { quantity: qty, grossWeight: gw } : null;
 
   const toKg = (s) => {
     const m = String(s || "").replace(/,/g, "").match(/([\d.]+)\s*(MT|KGS?|TONS?|T)?/i);

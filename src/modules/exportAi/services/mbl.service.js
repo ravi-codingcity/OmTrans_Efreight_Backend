@@ -50,13 +50,25 @@ function buildMblSourceSummary(documents = [], options = {}) {
     });
     return { value: vals.join(", "), sources: src };
   };
+  // Only a real Container Number (ISO 6346: 4 letters + 6-7 digits) qualifies — the
+  // CIN Number on the LEO must never be reported as the Container Number.
+  const isContainerNoVal = (v) => /^[A-Z]{4}\d{6,7}$/.test(normKeyVal(v));
   const fromContainers = (docs) => {
     const vals = []; const src = [];
     docs.forEach((d) => {
-      ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => { if (!isEmptyVal(c.containerNo)) { pushU(vals, c.containerNo); if (!src.includes(name(d))) src.push(name(d)); } });
-      const cf = d.extractedFields && d.extractedFields.container_number; if (!isEmptyVal(cf)) { pushU(vals, cf); if (!src.includes(name(d))) src.push(name(d)); }
+      ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => { if (isContainerNoVal(c.containerNo)) { pushU(vals, c.containerNo); if (!src.includes(name(d))) src.push(name(d)); } });
+      const cf = d.extractedFields && d.extractedFields.container_number; if (isContainerNoVal(cf)) { pushU(vals, cf); if (!src.includes(name(d))) src.push(name(d)); }
     });
     return { value: vals.join(", "), sources: src };
+  };
+  // Container Number source resolution: LEO / Shipping Bill / EDI first, then fall
+  // back in order CLP → Forwarding Note → Form 13 (E-Gate) — never the CIN.
+  const resolveContainers = () => {
+    for (const grp of [leoDocs, clpDocs, fwdDocs, egateDocs, documents]) {
+      const r = fromContainers(grp);
+      if (r.value) return r;
+    }
+    return { value: "", sources: [] };
   };
   const fromSeals = (docs) => {
     const vals = []; const src = [];
@@ -92,7 +104,7 @@ function buildMblSourceSummary(documents = [], options = {}) {
     { field: "HSN Code", res: fromHsn(leoDocs.length ? leoDocs : documents) },
     { field: "Quantity (PKG)", res: fromField(leoDocs, "number_of_packages") },
     { field: "Gross Weight (G. WT)", res: fromField(leoDocs, "total_gross_weight") },
-    { field: "Container Number(s)", res: fromContainers(leoDocs.length ? leoDocs : documents) },
+    { field: "Container Number(s)", res: resolveContainers() },
     { field: "Seal Number(s)", res: fromSeals(sealDocs.length ? sealDocs : leoDocs) },
     { field: "Net WT", res: fromField(siDocs, "total_net_weight") },
     { field: "Freight", res: fromField(siDocs, "freight") },
