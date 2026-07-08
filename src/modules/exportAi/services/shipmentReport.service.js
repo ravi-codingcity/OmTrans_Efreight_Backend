@@ -1,5 +1,5 @@
 const { SHIPMENT_REPORT_TEMPLATE } = require("../config/templates");
-const { isPriorityDoc, isShippingInstruction } = require("./comparison.service");
+const { isPriorityDoc, isSupportingDoc, isShippingInstruction } = require("./comparison.service");
 
 /* ------------------------------------------------------------------ */
 /*  Full shipment-report data builder (ported faithfully).            */
@@ -27,7 +27,10 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
   // data (exporter, goods, SB number/date, gross weight, quantity, container) comes
   // only from that document — never from another shipment's LEO or a shared doc that
   // happens to reference a shipping bill.
-  const sbDocs = options.leoDoc ? [options.leoDoc] : documents.filter(isPriorityDoc);
+  // The LEO set is the LEO / Shipping Bill / Indian Customs EDI documents ONLY. CLP,
+  // Forwarding Note and Form 13 are explicitly excluded — they are supporting documents,
+  // never LEOs, so their Quantity (PKG) / Gross Weight (G. WT) can never be summed.
+  const sbDocs = options.leoDoc ? [options.leoDoc] : documents.filter((d) => isPriorityDoc(d) && !isSupportingDoc(d));
   // Description of Goods (and its HSN codes) must ALWAYS come from the Shipping
   // Bill / LEO / Indian Customs EDI — never from the Shipping Instruction. Prefer
   // the Shipping Bill; otherwise any non-SI document; SI is always excluded here.
@@ -143,7 +146,13 @@ function buildShipmentReportData(consolidated = {}, documents = [], options = {}
 
   const weightByContainer = new Map();
   const packagesByContainer = new Map();
-  [...fwdDocs, ...orderedDocs].forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
+  // Quantity (PKG) and Gross Weight (G. WT) must come ONLY from the LEO documents. In
+  // consolidated (Multiple LEO) mode we therefore read per-container weight/packages
+  // from the LEO(s) alone — never from CLP / Forwarding Note / Form 13 (the CLP holds
+  // consolidated totals that would double-count). Other workflows keep their existing
+  // Forwarding-Note-assisted per-container behaviour.
+  const wtPkgDocs = options.consolidated ? sbDocs : [...fwdDocs, ...orderedDocs];
+  wtPkgDocs.forEach((d) => ((d.rawExtraction && d.rawExtraction.containers) || []).forEach((c) => {
     if (isEmpty(c.containerNo)) return;
     const k = normKey(c.containerNo);
     if (!isEmpty(c.weight) && !weightByContainer.has(k)) weightByContainer.set(k, String(c.weight).trim());

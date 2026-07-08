@@ -1,4 +1,4 @@
-const { isPriorityDoc, isShippingInstruction } = require("./comparison.service");
+const { isPriorityDoc, isSupportingDoc, isShippingInstruction } = require("./comparison.service");
 
 /**
  * Build the default MBL data from a finalized HBL record. The MBL format is nearly
@@ -19,7 +19,10 @@ const docName = (d) => (d && d.originalName) || "document";
  */
 function buildMblSourceSummary(documents = [], options = {}) {
   const name = docName;
-  const leoDocs = documents.filter(isPriorityDoc);
+  // LEO set = LEO / Shipping Bill / Indian Customs EDI only. CLP, Forwarding Note and
+  // Form 13 are supporting documents and are never counted as LEOs (so Quantity /
+  // Gross Weight and their Totals are derived exclusively from the LEO documents).
+  const leoDocs = documents.filter((d) => isPriorityDoc(d) && !isSupportingDoc(d));
   const siDocs = documents.filter(isShippingInstruction);
   const bookingDocs = documents.filter((d) => d.detectedType === "booking_confirmation" || /booking/i.test(name(d)));
   const isMumbai = String(options.location || "").trim().toLowerCase() === "mumbai";

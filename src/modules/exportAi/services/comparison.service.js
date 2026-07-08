@@ -33,6 +33,19 @@ function isLeoDocument(doc) {
 }
 
 /**
+ * Supporting documents: CLP, Forwarding Note and Form 13 / E-Gate. These are NEVER LEO
+ * documents. They are used only for Seal Number and as a Container-Number fallback, and
+ * must never contribute Quantity (PKG) or Gross Weight (G. WT) — the CLP in particular
+ * carries CONSOLIDATED totals which would double-count against the per-LEO figures.
+ */
+function isSupportingDoc(doc) {
+  const type = (doc && doc.detectedType) || "";
+  if (["clp", "forwarding_note", "form_10", "egate"].includes(type)) return true;
+  const nm = `${(doc && doc.originalName) || ""}`.toLowerCase();
+  return /\bclp\b|container\s*load\s*plan|forwarding|form[\s_-]*10|form10|e[\s-]?gate|sez[\s-]*4|form[\s_-]*13|form[\s_-]*6(?!\d)/.test(nm);
+}
+
+/**
  * Shipping Instruction / Bill of Lading Instructions — the high-priority source for
  * Shipper/Consignee/Notify addresses, Container & Seal numbers, Freight term and Net
  * Weight. (It does NOT override every field; see shipmentReport.service.js.)
@@ -96,4 +109,4 @@ function reconcileDocuments(documents) {
   return { consolidated, comparison, discrepancies, missingFields, validationScore };
 }
 
-module.exports = { isPriorityDoc, isLeoDocument, isShippingInstruction, reconcileDocuments };
+module.exports = { isPriorityDoc, isLeoDocument, isSupportingDoc, isShippingInstruction, reconcileDocuments };
