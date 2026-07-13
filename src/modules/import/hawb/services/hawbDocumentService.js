@@ -11,6 +11,25 @@ const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
 const DEFAULT_HANDLING =
   "BOXES ADDED AND MKD.// ONE ENV CONTG DOCS ( H.AWB, MANIFEST, INVOICE, PACKING LIST ) ATTD WITH THE SHPT.";
 
+/**
+ * Handling Information carries the No. of Pieces (RCP) as a prefix on the standard
+ * boilerplate ("25" -> "25 BOXES ADDED AND MKD.// …"). The form already derives this,
+ * but we re-derive it here so the value persisted in the database is always consistent
+ * — including for API clients (or older records) that send the bare boilerplate while
+ * supplying a piece count. A hand-edited Handling Information is never overwritten, and
+ * an existing prefix is re-synced to the current piece count rather than doubled.
+ */
+const applyPiecesToHandling = (handling, pieces) => {
+  const n = str(pieces);
+  const h = str(handling);
+  if (!h) return n ? `${n} ${DEFAULT_HANDLING}` : DEFAULT_HANDLING;
+  // Auto-derived so far? (bare boilerplate, or boilerplate with a numeric prefix)
+  const withoutPrefix = h.replace(/^\d+\s+/, "");
+  const isAuto = h === DEFAULT_HANDLING || (/^\d+\s+/.test(h) && withoutPrefix === DEFAULT_HANDLING);
+  if (!isAuto) return h; // manually edited — leave exactly as the user wrote it
+  return n ? `${n} ${DEFAULT_HANDLING}` : DEFAULT_HANDLING;
+};
+
 // Format any date value to DD/MM/YYYY (documents/display use this format).
 const formatDMY = (val) => {
   const s = str(val);
@@ -46,8 +65,12 @@ const sanitizeHawbPayload = (body = {}, user = {}) => ({
 
   freight: str(body.freight),
 
-  handling_information:
-    body.handling_information !== undefined ? str(body.handling_information) : DEFAULT_HANDLING,
+  // Handling Information = No. of Pieces (RCP) prefixed to the standard boilerplate,
+  // unless the user hand-edited it (then it is preserved verbatim).
+  handling_information: applyPiecesToHandling(
+    body.handling_information !== undefined ? body.handling_information : DEFAULT_HANDLING,
+    body.no_of_pieces
+  ),
 
   no_of_pieces: str(body.no_of_pieces),
   gross_weight: str(body.gross_weight),
