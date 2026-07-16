@@ -290,12 +290,14 @@ const getIsfData = asyncHandler(async (req, res) => {
   if (!(job.shipmentReport && job.shipmentReport.generated)) throw ApiError.badRequest("Generate the HBL before creating an ISF");
   if (!(job.isf && job.isf.data)) {
     job.isf = job.isf || {};
-    job.isf.data = buildIsfFromShipment(job.shipmentReport.data, job.mbl && job.mbl.data, job.documents || []);
+    job.isf.data = buildIsfFromShipment(job.shipmentReport.data, job.mbl && job.mbl.data, job.documents || [], {
+      consolidated: job.shipmentType === "multiple_single",
+    });
     job.isf.generated = false;
     job.markModified("isf");
     await job.save();
   }
-  res.json({ success: true, data: job.isf.data, generated: Boolean(job.isf.generated), pdfEngine: job.isf.pdfEngine, jobNumber: job.jobNumber });
+  res.json({ success: true, data: job.isf.data, generated: Boolean(job.isf.generated), pdfEngine: job.isf.pdfEngine, shipmentType: job.shipmentType, jobNumber: job.jobNumber });
 });
 
 /** Generate the final ISF Word + PDF from the (edited) ISF data. */

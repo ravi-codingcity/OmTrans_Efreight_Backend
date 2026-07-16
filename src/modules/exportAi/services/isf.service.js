@@ -9,8 +9,29 @@ const SCAC_CODE = "OLLI";
 const AMS_NO = "146616001586";
 
 const isBookingDoc = (d) => d.detectedType === "booking_confirmation" || /booking/i.test(d.originalName || "");
+const norm = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().toUpperCase();
 
-function buildIsfFromShipment(hblData = {}, mblData = null, documents = []) {
+// Split a Booking-Confirmation ETD/ETA value that carries "PORT, COUNTRY, DD/MM/YYYY"
+// (or any order) into its location and date parts.
+const splitLocDate = (raw) => {
+  const s = String(raw == null ? "" : raw).trim();
+  if (!s) return { loc: "", date: "" };
+  const dm = s.match(/\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}/);
+  const date = dm ? dm[0] : "";
+  let loc = date ? s.slice(0, dm.index) + s.slice(dm.index + date.length) : s;
+  loc = loc.replace(/[–—-]/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").replace(/\s{2,}/g, " ").trim();
+  return { loc, date };
+};
+// Combine a location and a date into "LOCATION – DATE" (falling back to whichever
+// part is present, or the caller's fallback when both are empty).
+const combineLocDate = (loc, date, fallback) => {
+  const l = String(loc || "").trim();
+  const d = String(date || "").trim();
+  if (l && d) return `${l} – ${d}`;
+  return d || l || String(fallback || "").trim();
+};
+
+function buildIsfFromShipment(hblData = {}, mblData = null, documents = [], options = {}) {
   const summary = (label) => {
     const f = (hblData.summary || []).find((s) => s.label === label);
     return (f && f.value) || "";
@@ -41,13 +62,39 @@ function buildIsfFromShipment(hblData = {}, mblData = null, documents = []) {
 
   const pol = summary("Port of Loading (POL)");
   const pod = summary("Port of Discharge (POD)");
-  const vesselEtd = hblData.vesselEtd || bookingField("vessel_etd") || pol;
-  const vesselEta = hblData.vesselEta || bookingField("vessel_eta") || pod;
+
+  // ETD / ETA. For the consolidated (Multiple LEO → Single HBL) workflow the ISF shows
+  // BOTH the location and the date ("NHAVA SHEVA, INDIA – 2026-07-20"): the location is
+  // taken from the Booking Confirmation's ETD/ETA value (or Port of Loading/Discharge
+  // as a fallback) and combined with the date. Other workflows keep the existing value.
+  let vesselEtd, vesselEta;
+  if (options.consolidated) {
+    const etdRaw = hblData.vesselEtd || bookingField("vessel_etd");
+    const etaRaw = hblData.vesselEta || bookingField("vessel_eta");
+    const etd = splitLocDate(etdRaw);
+    const eta = splitLocDate(etaRaw);
+    vesselEtd = combineLocDate(etd.loc || bookingField("port_of_loading") || pol, etd.date, etdRaw || pol);
+    vesselEta = combineLocDate(eta.loc || bookingField("port_of_discharge") || pod, eta.date, etaRaw || pod);
+  } else {
+    vesselEtd = hblData.vesselEtd || bookingField("vessel_etd") || pol;
+    vesselEta = hblData.vesselEta || bookingField("vessel_eta") || pod;
+  }
+
+  // Manufacturer / Seller / Container Stuffing Location default to the Shipper. In the
+  // consolidated workflow, where they are identical, avoid printing the same address
+  // three times — the Manufacturer keeps the full address and the others reference it.
+  // Genuinely different values are preserved as-is.
+  let seller = shipper;
+  let stuffingLocation = shipper;
+  if (options.consolidated) {
+    if (norm(seller) === norm(shipper)) seller = "SAME AS MANUFACTURER / SUPPLIER";
+    if (norm(stuffingLocation) === norm(shipper)) stuffingLocation = "SAME AS MANUFACTURER / SUPPLIER";
+  }
 
   return {
     manufacturer: shipper,
-    seller: shipper,
-    stuffingLocation: shipper,
+    seller,
+    stuffingLocation,
     buyer: consignee,
     shipTo: consignee,
     invoiceNumber: descLine("invoiceNo"),
